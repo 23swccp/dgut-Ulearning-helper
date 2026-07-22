@@ -1,53 +1,22 @@
-# 优学院签到助手
+# 东莞理工学院优学院签到助手
+> 一个基于 **Tauri + React + Python** 开发的本地 Windows 桌面工具，用于优学院课程读取与签到活动轮询。
+这是一个专为莞工优学院定制的签到脚本,目前只能实现数字码签到,二维码签到和位置签到仍在开发.
+## ✨ 功能
 
-当前主程序是 **Tauri + React 桌面版**。React 负责终端式界面和设置页，Python 负责浏览器登录、课程读取与签到轮询。
+- 终端式桌面界面：通过 Enter 和命令完成主要操作；
+- 支持 Microsoft Edge、Google Chrome 等 Chromium 浏览器；
+- 自动读取本地登录缓存；缓存失效时可启动浏览器重新登录；
+- 获取并展示当前账号的课程列表；
+- 一次选择一门课程进行签到活动轮询；
+- 实时显示每轮检查、发现活动、处理结果和异常信息；
+- 支持持续追加式运行日志；
+- 提供浏览器、日志与数据、关于三个设置页面；
+- 支持打包为 Windows 安装程序，普通用户无需安装 Python 或 Node.js。
+## ⚠️ 使用声明
 
-## 目录说明
+- 本项目为非官方个人开源项目，与东莞理工学院及优学院平台无官方关联。
+- 请仅在遵守学校规定、平台规则和课程要求的前提下使用。
+- 程序完全运行在本地,不收集、不上传账号密码、Token 或课程数据；
+- 使用本项目产生的后果由使用者自行承担。
 
-```text
-优学院脚本/
-├─ tauri-react/       主桌面程序：TypeScript、React、Tauri 与 sidecar 通信层
-├─ yxy_backend.py     Python 签到后端（浏览器、课程、轮询、日志）
-├─ test_backend.py    后端基础回归测试
-├─ requirements.txt   Python 开发依赖
-├─ release/           可发给朋友的安装包与免安装发布包
-├─ archive/           本地保留的旧界面原型（不上传到 GitHub）
-├─ browser_profile/   本机浏览器登录配置目录；属于个人运行数据，不提交、不发送
-└─ config.json        本机浏览器与日志设置；属于个人运行数据，不提交、不发送
-```
 
-## 日常测试
-
-直接运行已经打包的程序：
-
-`tauri-react/src-tauri/target/release/yxy-desktop.exe`
-
-发给朋友时，优先使用：
-
-`release/优学院签到助手_初代发布包/安装版/优学院签到助手_0.1.0_x64-setup.exe`
-
-## 开发命令
-
-在 `tauri-react` 目录运行：
-
-```powershell
-npm run tauri -- dev
-```
-
-修改 Python 后端后，先重新生成 sidecar，再生成安装包：
-
-```powershell
-npm run build:sidecar
-npm run tauri -- build --bundles nsis
-```
-
-## 后端测试
-
-```powershell
-python -m unittest -v test_backend.py
-```
-
-## 安全提醒
-
-- `browser_profile/`、`config.json`、运行日志和登录信息都可能是个人数据，开源或发送项目之前必须排除。
-- 发布给普通用户只发送 `release/` 里的安装包；不要发送整个源码目录。
