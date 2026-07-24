@@ -32,6 +32,12 @@ class AppConfig:
     lat: float = 23.0432
     lng: float = 113.3993
     address: str = "东莞理工学院"
+    # 课件学习辅助：仅控制播放、文档阅读与章节衔接；测验由用户自行完成。
+    course_playback_rate: float = 8.0
+    course_auto_dismiss_dialog: bool = True
+    course_document_scroll_enabled: bool = True
+    course_document_scroll_interval: float = 3.0
+    course_document_scroll_speed: float = 3.0
 
     @classmethod
     def from_mapping(cls, values: dict, root: Path) -> "AppConfig":
@@ -133,6 +139,7 @@ class SignBackend:
         if self.token:
             self.headers["Authorization"] = self.token
         self.api = ApiClient(self.headers)
+        self._course_controller = None
 
     def _load_config(self) -> AppConfig:
         values: dict = {}
@@ -166,6 +173,34 @@ class SignBackend:
 
     def _log(self, text: str, kind: str = "muted") -> None:
         self.emit(text, kind)
+
+    @property
+    def course_controller(self):
+        """延迟创建课程页控制器，避免普通签到流程依赖浏览器课件页。"""
+        if self._course_controller is None:
+            from yxy_course import CourseController
+            self._course_controller = CourseController(self._log)
+        return self._course_controller
+
+    def start_course_helper(self) -> bool:
+        """启动课件学习辅助；需用户先在调试浏览器打开课件学习页。"""
+        from yxy_course import CourseConfig
+        config = CourseConfig(
+            playback_rate=float(self.config.course_playback_rate),
+            auto_dismiss_dialog=bool(self.config.course_auto_dismiss_dialog),
+            document_scroll_enabled=bool(self.config.course_document_scroll_enabled),
+            document_scroll_interval=float(self.config.course_document_scroll_interval),
+            document_scroll_speed=float(self.config.course_document_scroll_speed),
+        )
+        return self.course_controller.start(config)
+
+    def stop_course_helper(self) -> None:
+        """停止课程页控制器，不关闭用户的浏览器标签页。"""
+        self.course_controller.stop()
+
+    def set_course_speed(self, rate: float) -> None:
+        """在运行中调整视频播放倍速。"""
+        self.course_controller.set_speed(float(rate))
 
     def _persist_credentials(self) -> None:
         """把最近一次有效凭据保存到本地 auth.json，绝不修改或污染源码。"""
