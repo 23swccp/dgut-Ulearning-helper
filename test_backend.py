@@ -3,6 +3,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from yxy_backend import Activity, AppConfig, Course, SignBackend
 
@@ -42,6 +43,23 @@ class BackendTests(unittest.TestCase):
         activity = Activity.from_api({"relationId": 1, "scoreType": 3, "custom": "kept"})
         self.assertEqual(activity.score_type, 3)
         self.assertEqual(activity.raw["custom"], "kept")
+
+    def test_browser_launch_uses_debug_mode_and_opens_requested_url(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            browser = root / "msedge.exe"
+            browser.touch()
+            backend = self.make_backend(root)
+            backend.config.browser_name = "Microsoft Edge"
+            backend.config.browser_path = str(browser)
+            url = "http://127.0.0.1:1420"
+
+            with patch.object(backend, "_open_debug_tab", return_value=False), patch("yxy_backend.subprocess.Popen") as popen:
+                self.assertTrue(backend.start_browser(url))
+
+            command = popen.call_args.args[0]
+            self.assertIn("--remote-debugging-port=9222", command)
+            self.assertIn(url, command)
 
 
 if __name__ == "__main__":
