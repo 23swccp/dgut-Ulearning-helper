@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent
 SIDECAR_DIR = ROOT / "tauri-react" / "sidecar"
 sys.path.insert(0, str(SIDECAR_DIR))
 
-from bridge import handle  # noqa: E402
+from bridge import backend, handle  # noqa: E402,F401
 
 
 class LocalApiHandler(BaseHTTPRequestHandler):

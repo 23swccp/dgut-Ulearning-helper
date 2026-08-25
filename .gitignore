@@ -4,6 +4,7 @@ config.json
 auth.json
 签到记录.md
 sidecar-debug.log
+browser-launcher.log
 
 # Python 生成文件
 __pycache__/
