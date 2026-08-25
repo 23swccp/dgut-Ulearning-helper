@@ -1,4 +1,2 @@
 requests>=2.31
 websocket-client>=1.6
-PyQt5>=5.15
-PyQt-Fluent-Widgets>=1.11

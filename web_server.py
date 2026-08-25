@@ -3,20 +3,13 @@
 from __future__ import annotations
 
 import json
-import sys
 import threading
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from typing import Any
 
-
-ROOT = Path(__file__).resolve().parent
-SIDECAR_DIR = ROOT / "tauri-react" / "sidecar"
-sys.path.insert(0, str(SIDECAR_DIR))
-
-from bridge import backend, handle  # noqa: E402,F401
+from backend_commands import backend, handle
 
 
 SHUTDOWN_EVENT = threading.Event()
@@ -45,7 +38,7 @@ def reset_client_state() -> None:
 
 
 class LocalApiHandler(BaseHTTPRequestHandler):
-    """把浏览器命令转给同一套 sidecar 命令处理逻辑。"""
+    """把浏览器请求转给统一后端命令层。"""
 
     server_version = "YxyLocalApi/1.0"
 

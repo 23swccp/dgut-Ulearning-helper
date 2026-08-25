@@ -9,13 +9,9 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 import threading
 import time
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any, Callable
 
 import requests
@@ -23,75 +19,6 @@ from websocket import create_connection
 
 
 COURSE_TAB_URL_KEYWORD = "ua.dgut.edu.cn/learnCourse"
-
-
-# ============================================================================
-# 浏览器调试模式管理
-# ============================================================================
-def _debug_port_alive(port: int = 9222) -> bool:
-    """检测浏览器远程调试端口是否已就绪。"""
-    try:
-        requests.get(f"http://127.0.0.1:{port}/json", timeout=2).json()
-        return True
-    except (requests.RequestException, ValueError):
-        return False
-
-
-def _find_edge() -> str | None:
-    """查找 Edge 可执行文件路径。"""
-    candidates = [
-        os.path.expandvars(r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe"),
-        os.path.expandvars(r"%PROGRAMFILES%\Microsoft\Edge\Application\msedge.exe"),
-        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"),
-    ]
-    for path in candidates:
-        if Path(path).is_file():
-            return path
-    return None
-
-
-def ensure_browser_debug(port: int = 9222, root: Path | None = None) -> bool:
-    """确保浏览器开了远程调试端口。
-
-    - 端口已就绪 → 直接返回 True（跳过启动）
-    - 端口未就绪 → 启动 Edge 调试模式（用独立 profile，不干扰用户主浏览器，不 taskkill）
-    - 启动后最多等 20 秒端口就绪
-
-    返回 True 表示端口可用，False 表示启动失败。
-    """
-    if _debug_port_alive(port):
-        return True
-
-    path = _find_edge()
-    if not path:
-        return False
-
-    profile = (root or Path(__file__).resolve().parent) / "browser_profile"
-    command = [
-        path,
-        f"--remote-debugging-port={port}",
-        "--remote-allow-origins=*",
-        f"--user-data-dir={profile}",
-        "--no-first-run",
-        "--no-default-browser-check",
-    ]
-    try:
-        subprocess.Popen(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except OSError:
-        return False
-
-    # 等端口就绪
-    for _ in range(20):
-        if _debug_port_alive(port):
-            return True
-        time.sleep(1)
-    return False
 
 
 # ============================================================================
@@ -838,83 +765,3 @@ __all__ = [
     "CourseConfig",
     "CourseController",
 ]
-
-
-# ============================================================================
-# 命令行入口：python yxy_course.py
-# 直接运行本文件即可刷课，无需前端。
-# ============================================================================
-if __name__ == "__main__":
-    def _emit(text: str, kind: str) -> None:
-        prefix = {"success": "✓", "warn": "×", "info": "·", "muted": "·"}.get(kind, "·")
-        print(f"{prefix} {text}", flush=True)
-
-    print("=" * 56)
-    print("  优学院自动刷课  (CDP 注入版)")
-    print("=" * 56)
-    print("默认配置：倍速 8x，自动翻页；测验需手动处理")
-    print()
-
-    # 步骤1：自动启动浏览器调试模式（已开则跳过）
-    print("[1/3] 检查浏览器调试模式(9222)…")
-    if _debug_port_alive():
-        print("      端口已就绪，跳过启动")
-    else:
-        print("      未检测到，正在启动 Edge 调试模式…")
-        if not ensure_browser_debug():
-            print("× 启动失败。请手动启动：")
-            print('  msedge.exe --remote-debugging-port=9222 --remote-allow-origins=*')
-            try:
-                input("按回车退出... ")
-            except (EOFError, KeyboardInterrupt):
-                pass
-            sys.exit(1)
-        print("      Edge 调试模式已启动")
-
-    # 步骤2：提示用户登录并打开课件页
-    print()
-    print("[2/3] 请在浏览器中完成以下操作：")
-    print("  · 登录优学院")
-    print("  · 进入某课程 → 点击「课件」打开学习页")
-    print("    （URL 含 ua.dgut.edu.cn/learnCourse）")
-    print("  · 如果是edge浏览器可选：装 Global Speed 插件开高倍速")
-    print()
-    try:
-        input("完成后按回车开始刷课... ")
-    except (EOFError, KeyboardInterrupt):
-        sys.exit(0)
-
-    # 步骤3：启动刷课
-    print()
-    print("[3/3] 正在连接课件页…")
-
-    controller = CourseController(_emit)
-    config = CourseConfig()
-
-    if not controller.start(config):
-        print()
-        print("启动失败，请检查上方提示。")
-        print("常见原因：Edge 没开 9222 调试端口 / 没打开课件学习页")
-        try:
-            input("按回车退出... ")
-        except (EOFError, KeyboardInterrupt):
-            pass
-        sys.exit(1)
-
-    print()
-    print("刷课运行中... 按 Ctrl+C 停止")
-    print()
-    try:
-        while controller._running:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print()
-        print("用户中断，正在停止...")
-        controller.stop()
-
-    print()
-    print("刷课已结束。")
-    try:
-        input("按回车退出... ")
-    except (EOFError, KeyboardInterrupt):
-        pass

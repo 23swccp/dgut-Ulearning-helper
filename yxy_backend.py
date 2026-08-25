@@ -7,12 +7,13 @@ import os
 import subprocess
 import threading
 import time
-from urllib.parse import quote
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
+from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Callable
+from urllib.parse import quote, unquote
 
 import requests
 from websocket import create_connection
@@ -158,6 +159,55 @@ class SignBackend:
         except (OSError, json.JSONDecodeError):
             return {}
 
+    def _account_path(self) -> Path:
+        """账号密码仅作为可选的本机重新登录凭据，不写进源码或 config.json。"""
+        return self.root / "account.json"
+
+    def _load_account(self) -> dict:
+        try:
+            values = json.loads(self._account_path().read_text(encoding="utf-8"))
+            return values if isinstance(values, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def account_login_status(self) -> dict:
+        """只向前端返回是否已保存密码，绝不返回密码本身。"""
+        account = self._load_account()
+        return {
+            "enabled": bool(account.get("enabled")),
+            "username": str(account.get("username", "")),
+            "has_password": bool(account.get("password")),
+        }
+
+    def update_account_login(self, username: str, password: str, enabled: bool) -> bool:
+        """保存或清除可选的账号密码自动重新登录设置。"""
+        path = self._account_path()
+        if not enabled:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as error:
+                self._log(f"清除账号登录设置失败：{error}", "warn")
+                return False
+            self._log("已关闭账号密码自动重新登录，并清除本机保存的账号信息。", "success")
+            return True
+
+        previous = self._load_account()
+        username = username.strip() or str(previous.get("username", "")).strip()
+        password = password or str(previous.get("password", ""))
+        if not username or not password:
+            self._log("启用账号密码自动重新登录前，请填写学号和密码。", "warn")
+            return False
+        try:
+            path.write_text(
+                json.dumps({"enabled": True, "username": username, "password": password}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except OSError as error:
+            self._log(f"保存账号登录设置失败：{error}", "warn")
+            return False
+        self._log("已保存账号密码自动重新登录设置；仅会在登录缓存失效时尝试一次。", "success")
+        return True
+
     def save_config(self) -> None:
         self.config_path.write_text(json.dumps(self.config.to_mapping(), ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -214,17 +264,81 @@ class SignBackend:
         except OSError as error:
             self._log(f"保存本地登录缓存失败：{error}", "warn")
 
+    def _apply_token(self, token: str, user_id: int | None) -> None:
+        self.token = token
+        self.user_id = user_id
+        self.headers["Authorization"] = token
+        self._persist_credentials()
+
+    @staticmethod
+    def _cookie_value(response: requests.Response, name: str) -> str:
+        value = response.cookies.get(name)
+        if value:
+            return value
+        cookies = SimpleCookie()
+        cookies.load(response.headers.get("Set-Cookie", ""))
+        item = cookies.get(name)
+        return item.value if item else ""
+
+    def _relogin_with_account(self) -> bool:
+        """使用用户明确保存的账号密码重新获取 Token；每次调用只尝试一次。"""
+        account = self._load_account()
+        if not (account.get("enabled") and account.get("username") and account.get("password")):
+            return False
+        self._log("登录缓存已失效，正在尝试可选的账号密码重新登录…", "info")
+        try:
+            response = requests.post(
+                "https://application.dgut.edu.cn/appapi/user/login/app",
+                data={"loginName": account["username"], "password": account["password"], "alias": "application"},
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": self.headers["User-Agent"],
+                },
+                allow_redirects=False,
+                timeout=10,
+            )
+            if response.status_code not in (200, 302):
+                self._log(f"账号密码重新登录失败：服务器返回 {response.status_code}。", "warn")
+                return False
+            token = self._cookie_value(response, "AUTHORIZATION")
+            raw_user = self._cookie_value(response, "USERINFO")
+            if not token:
+                self._log("账号密码重新登录失败：未收到登录凭据。", "warn")
+                return False
+            try:
+                user_id = json.loads(unquote(raw_user)).get("userId") if raw_user else None
+                user_id = int(user_id) if user_id is not None else None
+            except (TypeError, ValueError, json.JSONDecodeError):
+                user_id = None
+            self._apply_token(token, user_id)
+            self._log("账号密码重新登录成功，已更新本地登录缓存。", "success")
+            return True
+        except requests.RequestException as error:
+            self._log(f"账号密码重新登录失败：{error}", "warn")
+            return False
+
+    @staticmethod
+    def _is_unauthorized(error: Exception) -> bool:
+        return "401" in str(error)
+
     def load_saved_courses(self) -> bool:
         """优先使用本地 auth.json 中保存的 Token，不启动浏览器。"""
         if not self.token:
-            self._log("本地脚本中没有已保存的登录信息。", "muted")
-            return False
+            self._log("本地没有可用的登录缓存。", "muted")
+            if not self._relogin_with_account():
+                return False
         self._log("正在使用本地保存的登录信息读取课程列表…", "info")
         try:
             self.courses = self._fetch_courses()
         except Exception as error:
             self._log(f"本地登录信息已失效：{error}", "warn")
-            return False
+            if not self._is_unauthorized(error) or not self._relogin_with_account():
+                return False
+            try:
+                self.courses = self._fetch_courses()
+            except Exception as retry_error:
+                self._log(f"重新登录后仍无法读取课程：{retry_error}", "warn")
+                return False
         if not self.courses:
             self._log("本地登录信息已失效或未读取到课程，需要重新登录。", "warn")
             return False
@@ -285,9 +399,7 @@ class SignBackend:
         if url:
             command.append(url)
         try:
-            # Tauri 会接管 sidecar 的标准输出；若 Edge 继承到其中无效的
-            # Windows 句柄，会在 Popen 阶段报 Errno 22。浏览器无需终端输入输出，
-            # 因此明确丢弃这些句柄。
+            # 浏览器无需继承启动器的终端句柄，明确丢弃输入输出。
             subprocess.Popen(
                 command,
                 stdin=subprocess.DEVNULL,

@@ -19,7 +19,7 @@ if sys.platform == "win32":
 
 
 ROOT = Path(__file__).resolve().parent
-FRONTEND = ROOT / "tauri-react"
+FRONTEND = ROOT / "web"
 LOG_PATH = ROOT / "browser-launcher.log"
 
 
@@ -134,7 +134,7 @@ def main() -> int:
         log_file = LOG_PATH.open("w", encoding="utf-8")
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         vite = subprocess.Popen(
-            [npm, "run", "web", "--", "--port", str(web_port), "--strictPort"],
+            [npm, "run", "dev", "--", "--port", str(web_port), "--strictPort"],
             cwd=FRONTEND,
             stdin=subprocess.DEVNULL,
             stdout=log_file,

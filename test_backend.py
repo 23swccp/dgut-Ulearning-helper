@@ -61,6 +61,18 @@ class BackendTests(unittest.TestCase):
             self.assertIn("--remote-debugging-port=9222", command)
             self.assertIn(url, command)
 
+    def test_optional_account_login_is_saved_separately_and_can_be_cleared(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            backend = self.make_backend(root)
+            self.assertFalse(backend.update_account_login("", "", True))
+            self.assertTrue(backend.update_account_login("20260001", "test-password", True))
+            self.assertEqual(backend.account_login_status(), {"enabled": True, "username": "20260001", "has_password": True})
+            self.assertTrue((root / "account.json").is_file())
+            self.assertTrue(backend.update_account_login("", "", True))
+            self.assertTrue(backend.update_account_login("", "", False))
+            self.assertFalse((root / "account.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
