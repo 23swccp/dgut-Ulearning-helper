@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -16,18 +17,28 @@ from web_server import LocalApiHandler, backend
 
 ROOT = Path(__file__).resolve().parent
 FRONTEND = ROOT / "tauri-react"
-WEB_URL = "http://127.0.0.1:1420"
-HEALTH_URL = f"{WEB_URL}/api/health"
 LOG_PATH = ROOT / "browser-launcher.log"
 
 
-def wait_for_frontend(process: subprocess.Popen, timeout: float = 30) -> None:
+def choose_frontend_port(start: int = 1420, attempts: int = 20) -> int:
+    """选择空闲端口，避免旧 Vite 进程导致新启动器误判成功。"""
+    for port in range(start, start + attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError(f"No free frontend port found in {start}-{start + attempts - 1}.")
+
+
+def wait_for_frontend(process: subprocess.Popen, health_url: str, timeout: float = 30) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise RuntimeError(f"Frontend process exited with code {process.returncode}.")
         try:
-            with urlopen(HEALTH_URL, timeout=1) as response:
+            with urlopen(health_url, timeout=1) as response:
                 if response.status == 200:
                     return
         except OSError:
@@ -84,13 +95,16 @@ def main() -> int:
     vite: subprocess.Popen | None = None
     log_file = None
     try:
+        web_port = choose_frontend_port()
+        web_url = f"http://127.0.0.1:{web_port}"
+        health_url = f"{web_url}/api/health"
         server = ThreadingHTTPServer(("127.0.0.1", 8765), LocalApiHandler)
         threading.Thread(target=server.serve_forever, name="local-api", daemon=True).start()
 
         log_file = LOG_PATH.open("w", encoding="utf-8")
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         vite = subprocess.Popen(
-            [npm, "run", "web"],
+            [npm, "run", "web", "--", "--port", str(web_port), "--strictPort"],
             cwd=FRONTEND,
             stdin=subprocess.DEVNULL,
             stdout=log_file,
@@ -98,14 +112,14 @@ def main() -> int:
             creationflags=creationflags,
         )
         print("Starting local web UI...")
-        wait_for_frontend(vite)
-        print(f"Local web UI is ready: {WEB_URL}")
+        wait_for_frontend(vite, health_url)
+        print(f"Local web UI is ready: {web_url}")
 
         if check_only:
             print("Startup check passed.")
             return 0
 
-        if not backend.start_browser(WEB_URL):
+        if not backend.start_browser(web_url):
             raise RuntimeError("Could not start a Chromium debug browser.")
         print("The UI has been opened in the debug browser.")
         print("Keep this window open. Press Ctrl+C to stop the local services.")
