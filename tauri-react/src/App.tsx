@@ -10,6 +10,7 @@ type Course = { id: number; name: string; teacherName: string };
 type AppConfig = { browser_name?: string; browser_path?: string; save_log?: boolean; log_path?: string };
 const icon = { terminal: "⌘", browser: "◎", logs: "▤", about: "i" };
 const isTauri = "__TAURI_INTERNALS__" in window;
+const browserLoginPayload = isTauri ? {} : { url: "https://lms.dgut.edu.cn" };
 
 function App() {
   const [page, setPage] = useState<Page>("terminal");
@@ -99,7 +100,7 @@ function App() {
     if (input.toLowerCase() === "login" || input === "登录") {
       append("正在启动登录浏览器，请稍候…");
       setPhase("login");
-      void call("start_browser").then(result => {
+      void call("start_browser", browserLoginPayload).then(result => {
         if (result.ok) append("请在浏览器中完成登录，完成后回到这里按 Enter 或输入 读取。 ");
         else append(`启动浏览器失败：${result.error || "未知错误"}`);
       });
@@ -151,7 +152,7 @@ function App() {
     if (!savedBrowser.ok) { setBusy(false); return; }
     if (savedBrowser.config) loadConfig(savedBrowser.config);
     setPage("terminal");
-    const result = await call("start_browser", isTauri ? {} : { url: "https://lms.dgut.edu.cn" });
+    const result = await call("start_browser", browserLoginPayload);
     if (!result.ok) append(`启动浏览器失败：${result.error || "未知错误"}`);
     setBusy(false);
   }
