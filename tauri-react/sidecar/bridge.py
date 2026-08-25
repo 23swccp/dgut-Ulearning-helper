@@ -84,7 +84,7 @@ def handle(command: str, payload: dict[str, Any]) -> dict[str, Any]:
         def launch() -> None:
             diagnostic("开始执行浏览器启动流程")
             try:
-                result = backend.start_browser()
+                result = backend.start_browser(str(payload.get("url", "")))
                 diagnostic(f"浏览器启动流程结束：{result}")
             except Exception as error:
                 diagnostic(f"浏览器启动异常：{error}\n{traceback.format_exc()}")

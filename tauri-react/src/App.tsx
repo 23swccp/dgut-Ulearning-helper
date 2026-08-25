@@ -9,6 +9,7 @@ type BackendResult = { ok: boolean; error?: string; courses?: Course[]; course?:
 type Course = { id: number; name: string; teacherName: string };
 type AppConfig = { browser_name?: string; browser_path?: string; save_log?: boolean; log_path?: string };
 const icon = { terminal: "⌘", browser: "◎", logs: "▤", about: "i" };
+const isTauri = "__TAURI_INTERNALS__" in window;
 
 function App() {
   const [page, setPage] = useState<Page>("terminal");
@@ -34,7 +35,9 @@ function App() {
   }, [page, busy]);
   useEffect(() => {
     let off: (() => void) | undefined;
-    listen<{ message: string }>("backend-log", event => append(event.payload.message)).then(unlisten => { off = unlisten; });
+    if (isTauri) {
+      listen<{ message: string }>("backend-log", event => append(event.payload.message)).then(unlisten => { off = unlisten; });
+    }
     call("get_settings").then(result => {
       if (result.ok) {
         if (result.config) loadConfig(result.config);
@@ -46,11 +49,11 @@ function App() {
     return () => off?.();
   }, []);
   useEffect(() => {
-    // 发布版使用本机 TCP 通信，后台日志由这里主动拉取，轮询状态可以实时显示。
+    // 浏览器版与发布版都主动拉取后台日志，避免依赖子进程 stdout 管道。
     let disposed = false;
     const pullEvents = async () => {
       try {
-        const result = await invoke<BackendResult>("backend_command", { command: "get_events", payload: {} });
+        const result = await call("get_events");
         if (!disposed) result.events?.forEach(event => append(event.message));
       } catch {
         // 启动阶段 sidecar 尚未就绪时安静重试，不污染终端。
@@ -63,7 +66,11 @@ function App() {
   useEffect(() => { const key = (e: KeyboardEvent) => e.key === "F8" && updateDemo(); window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key); });
 
   async function call(command: string, payload: Record<string, unknown> = {}): Promise<BackendResult> {
-    try { return await invoke<BackendResult>("backend_command", { command, payload }); }
+    try {
+      if (isTauri) return await invoke<BackendResult>("backend_command", { command, payload });
+      const response = await fetch("/api/command", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ command, payload }) });
+      return await response.json() as BackendResult;
+    }
     catch (error) { const message = `后端连接失败：${String(error)}`; append(message); return { ok: false, error: message }; }
   }
   function loadConfig(config: AppConfig) {
@@ -144,7 +151,7 @@ function App() {
     if (!savedBrowser.ok) { setBusy(false); return; }
     if (savedBrowser.config) loadConfig(savedBrowser.config);
     setPage("terminal");
-    const result = await call("start_browser");
+    const result = await call("start_browser", isTauri ? {} : { url: "https://lms.dgut.edu.cn" });
     if (!result.ok) append(`启动浏览器失败：${result.error || "未知错误"}`);
     setBusy(false);
   }

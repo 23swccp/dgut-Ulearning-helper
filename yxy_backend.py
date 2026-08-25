@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import threading
 import time
+from urllib.parse import quote
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -260,32 +260,29 @@ class SignBackend:
                     return path, name
         return None, None
 
-    def start_browser(self) -> bool:
+    def start_browser(self, url: str = "") -> bool:
         if not self.browser_start_lock.acquire(blocking=False):
             self._log("浏览器登录正在启动，请稍候。", "muted")
             return True
         try:
-            return self._start_browser_impl()
+            return self._start_browser_impl(url)
         finally:
             self.browser_start_lock.release()
 
-    def _start_browser_impl(self) -> bool:
+    def _start_browser_impl(self, url: str = "") -> bool:
+        url = url.strip()
+        if url and self._open_debug_tab(url):
+            return True
         path, name = self.find_browser()
         if not path:
             self._log("未找到可用浏览器。请打开设置并手动选择浏览器程序。", "warn")
             return False
         port = int(self.config.debug_port)
-        process_name = Path(path).name
-        self._log(f"正在关闭 {name} 并以远程调试模式启动…", "info")
-        try:
-            subprocess.run(["taskkill", "/f", "/im", process_name], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, timeout=5, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        except subprocess.TimeoutExpired:
-            self._log(f"关闭 {name} 超时，继续尝试启动登录浏览器。", "warn")
-        except OSError as error:
-            # 打包后的无控制台进程偶尔无法执行 taskkill；这不应阻断浏览器启动。
-            self._log(f"关闭 {name} 失败，继续尝试启动登录浏览器：{error}", "warn")
+        self._log(f"正在以远程调试模式启动 {name}…", "info")
         debug_profile = self.root / "browser_profile"
         command = [path, f"--remote-debugging-port={port}", "--remote-allow-origins=*", f"--user-data-dir={debug_profile}", "--no-first-run", "--no-default-browser-check"]
+        if url:
+            command.append(url)
         try:
             # Tauri 会接管 sidecar 的标准输出；若 Edge 继承到其中无效的
             # Windows 句柄，会在 Popen 阶段报 Errno 22。浏览器无需终端输入输出，
@@ -304,6 +301,18 @@ class SignBackend:
         self.save_config()
         self._log(f"已启动 {name}。请自行进入优学院并完成登录后回到本程序。", "success")
         return True
+
+    def _open_debug_tab(self, url: str) -> bool:
+        """调试浏览器已运行时，在同一配置中新增标签页而不是关闭所有窗口。"""
+        try:
+            port = int(self.config.debug_port)
+            response = requests.put(f"http://127.0.0.1:{port}/json/new?{quote(url, safe='')}", timeout=2)
+            if response.ok:
+                self._log("已在调试浏览器中新开页面。", "success")
+                return True
+        except requests.RequestException:
+            pass
+        return False
 
     def _get_ws_url(self) -> str | None:
         try:

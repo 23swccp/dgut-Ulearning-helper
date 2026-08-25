@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "web": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
     "build:sidecar": "python -m PyInstaller --noconfirm --onefile --windowed --name yxy-sidecar-x86_64-pc-windows-msvc --paths .. --distpath src-tauri/binaries --workpath .pyinstaller-work --specpath .pyinstaller-spec sidecar/bridge.py",
     "tauri": "tauri"
