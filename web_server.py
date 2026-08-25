@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,6 +16,9 @@ SIDECAR_DIR = ROOT / "tauri-react" / "sidecar"
 sys.path.insert(0, str(SIDECAR_DIR))
 
 from bridge import backend, handle  # noqa: E402,F401
+
+
+SHUTDOWN_EVENT = threading.Event()
 
 
 class LocalApiHandler(BaseHTTPRequestHandler):
@@ -41,6 +45,10 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             payload = request.get("payload") or {}
             if not isinstance(payload, dict):
                 raise ValueError("payload 必须是对象")
+            if command == "shutdown_app":
+                self._send_json(HTTPStatus.OK, {"ok": True})
+                SHUTDOWN_EVENT.set()
+                return
             self._send_json(HTTPStatus.OK, handle(command, payload))
         except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
             self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(error)})

@@ -97,6 +97,18 @@ function App() {
     const input = command.trim(); setCommand(""); setBusy(true);
     if (input.toLowerCase() === "clear") { setLogs([]); setBusy(false); return; }
     if (input) append(`> ${input}`);
+    if (input.toLowerCase() === "kill") {
+      if (isTauri) {
+        append("kill 仅用于浏览器源码版；桌面版请直接关闭窗口。 ");
+        setBusy(false);
+        return;
+      }
+      const result = await call("shutdown_app");
+      if (result.ok) append("正在关闭本地服务与前端进程…");
+      else append(`退出失败：${result.error || "未知错误"}`);
+      setBusy(false);
+      return;
+    }
     if (input.toLowerCase() === "login" || input === "登录") {
       append("正在启动登录浏览器，请稍候…");
       setPhase("login");

@@ -12,7 +12,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.request import urlopen
 
-from web_server import LocalApiHandler, backend
+from web_server import LocalApiHandler, SHUTDOWN_EVENT, backend
 
 
 ROOT = Path(__file__).resolve().parent
@@ -79,6 +79,7 @@ def show_log_tail() -> None:
 
 def main() -> int:
     check_only = "--check" in sys.argv
+    SHUTDOWN_EVENT.clear()
     npm = shutil.which("npm.cmd") or shutil.which("npm")
     if not npm:
         print("ERROR: Node.js/npm was not found in PATH.")
@@ -124,8 +125,11 @@ def main() -> int:
         print("The UI has been opened in the debug browser.")
         print("Keep this window open. Press Ctrl+C to stop the local services.")
 
-        while vite.poll() is None:
-            time.sleep(0.5)
+        while vite.poll() is None and not SHUTDOWN_EVENT.wait(0.5):
+            pass
+        if SHUTDOWN_EVENT.is_set():
+            print("Shutdown requested from the web terminal.")
+            return 0
         raise RuntimeError(f"Frontend process exited with code {vite.returncode}.")
     except KeyboardInterrupt:
         print("\nStopping local services...")
