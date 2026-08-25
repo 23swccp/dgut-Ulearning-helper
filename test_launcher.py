@@ -5,13 +5,26 @@ import socket
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
+from unittest.mock import patch
 from urllib.request import Request, urlopen
 
+import browser_launcher
 from browser_launcher import choose_frontend_port
 from web_server import CLIENT_CLOSED_EVENT, LocalApiHandler, SHUTDOWN_EVENT, client_last_seen, reset_client_state
 
 
 class BrowserLauncherTests(unittest.TestCase):
+    def test_terminal_kill_command_is_echoed_and_parsed(self):
+        if not hasattr(browser_launcher, "msvcrt"):
+            self.skipTest("Windows console test")
+        with patch.object(browser_launcher.msvcrt, "kbhit", return_value=True), patch.object(
+            browser_launcher.msvcrt, "getwch", side_effect=list("kill\r")
+        ), patch("builtins.print") as output:
+            buffer, command = browser_launcher.poll_terminal_command("")
+        self.assertEqual(buffer, "")
+        self.assertEqual(command, "kill")
+        self.assertGreaterEqual(output.call_count, 5)
+
     def test_chooses_another_port_when_first_port_is_busy(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
             listener.bind(("127.0.0.1", 0))

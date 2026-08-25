@@ -14,6 +14,9 @@ from urllib.request import urlopen
 
 from web_server import CLIENT_CLOSED_EVENT, LocalApiHandler, SHUTDOWN_EVENT, backend, client_last_seen, reset_client_state
 
+if sys.platform == "win32":
+    import msvcrt
+
 
 ROOT = Path(__file__).resolve().parent
 FRONTEND = ROOT / "tauri-react"
@@ -77,6 +80,31 @@ def show_log_tail() -> None:
         print("\n".join(lines[-20:]))
 
 
+def poll_terminal_command(buffer: str) -> tuple[str, str | None]:
+    """非阻塞读取 Windows 启动器终端，并手动回显输入字符。"""
+    if sys.platform != "win32":
+        return buffer, None
+    while msvcrt.kbhit():
+        char = msvcrt.getwch()
+        if char in ("\x00", "\xe0"):
+            if msvcrt.kbhit():
+                msvcrt.getwch()
+            continue
+        if char in ("\r", "\n"):
+            print()
+            return "", buffer.strip().lower()
+        if char == "\b":
+            if buffer:
+                buffer = buffer[:-1]
+                print("\b \b", end="", flush=True)
+            continue
+        if char == "\x03":
+            raise KeyboardInterrupt
+        buffer += char
+        print(char, end="", flush=True)
+    return buffer, None
+
+
 def main() -> int:
     check_only = "--check" in sys.argv
     SHUTDOWN_EVENT.clear()
@@ -125,27 +153,38 @@ def main() -> int:
             raise RuntimeError("Could not start a Chromium debug browser.")
         print("The UI has been opened in the debug browser.")
         print("Close the frontend tab to stop the local services automatically.")
-        print("You can also enter 'kill' in the web terminal or press Ctrl+C here.")
+        print("Type 'kill' here and press Enter, or press Ctrl+C, to stop manually.")
+        print("> ", end="", flush=True)
 
         client_connected = False
         close_requested_at: float | None = None
-        while vite.poll() is None and not SHUTDOWN_EVENT.wait(0.5):
+        terminal_buffer = ""
+        while vite.poll() is None and not SHUTDOWN_EVENT.wait(0.2):
+            terminal_buffer, terminal_command = poll_terminal_command(terminal_buffer)
+            if terminal_command == "kill":
+                print("Shutdown requested from the launcher terminal.")
+                return 0
+            if terminal_command is not None:
+                if terminal_command:
+                    print(f"Unknown command: {terminal_command}. Type 'kill' to stop.")
+                print("> ", end="", flush=True)
             last_seen = client_last_seen()
             if last_seen and not client_connected:
                 client_connected = True
-                print("Frontend tab connected; heartbeat monitoring is active.")
+                print("\nFrontend tab connected; heartbeat monitoring is active.")
+                print(f"> {terminal_buffer}", end="", flush=True)
             if CLIENT_CLOSED_EVENT.is_set():
                 close_requested_at = close_requested_at or time.monotonic()
                 if time.monotonic() - close_requested_at >= 5:
-                    print("Frontend tab closed; stopping local services.")
+                    print("\nFrontend tab closed; stopping local services.")
                     return 0
             else:
                 close_requested_at = None
             if client_connected and time.monotonic() - last_seen >= 90:
-                print("Frontend heartbeat timed out; stopping local services.")
+                print("\nFrontend heartbeat timed out; stopping local services.")
                 return 0
         if SHUTDOWN_EVENT.is_set():
-            print("Shutdown requested from the web terminal.")
+            print("\nShutdown requested from the web terminal.")
             return 0
         raise RuntimeError(f"Frontend process exited with code {vite.returncode}.")
     except KeyboardInterrupt:
