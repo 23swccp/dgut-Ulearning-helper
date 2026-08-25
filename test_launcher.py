@@ -8,7 +8,7 @@ from http.server import ThreadingHTTPServer
 from urllib.request import Request, urlopen
 
 from browser_launcher import choose_frontend_port
-from web_server import LocalApiHandler, SHUTDOWN_EVENT
+from web_server import CLIENT_CLOSED_EVENT, LocalApiHandler, SHUTDOWN_EVENT, client_last_seen, reset_client_state
 
 
 class BrowserLauncherTests(unittest.TestCase):
@@ -41,6 +41,29 @@ class BrowserLauncherTests(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
             SHUTDOWN_EVENT.clear()
+
+    def test_heartbeat_recovers_from_page_refresh_close_signal(self):
+        reset_client_state()
+        server = ThreadingHTTPServer(("127.0.0.1", 0), LocalApiHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        port = server.server_address[1]
+        try:
+            closed = Request(f"http://127.0.0.1:{port}/api/client-closed", data=b"", method="POST")
+            with urlopen(closed, timeout=3):
+                pass
+            self.assertTrue(CLIENT_CLOSED_EVENT.is_set())
+
+            heartbeat = Request(f"http://127.0.0.1:{port}/api/heartbeat", data=b"", method="POST")
+            with urlopen(heartbeat, timeout=3):
+                pass
+            self.assertFalse(CLIENT_CLOSED_EVENT.is_set())
+            self.assertGreater(client_last_seen(), 0)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+            reset_client_state()
 
 
 if __name__ == "__main__":

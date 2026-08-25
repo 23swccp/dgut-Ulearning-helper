@@ -64,6 +64,15 @@ function App() {
     const timer = window.setInterval(() => void pullEvents(), 1000);
     return () => { disposed = true; window.clearInterval(timer); };
   }, []);
+  useEffect(() => {
+    if (isTauri) return;
+    const heartbeat = () => void fetch("/api/heartbeat", { method: "POST", keepalive: true }).catch(() => undefined);
+    const closing = () => { navigator.sendBeacon("/api/client-closed", ""); };
+    heartbeat();
+    const timer = window.setInterval(heartbeat, 2000);
+    window.addEventListener("pagehide", closing);
+    return () => { window.clearInterval(timer); window.removeEventListener("pagehide", closing); };
+  }, []);
   useEffect(() => { const key = (e: KeyboardEvent) => e.key === "F8" && updateDemo(); window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key); });
 
   async function call(command: string, payload: Record<string, unknown> = {}): Promise<BackendResult> {

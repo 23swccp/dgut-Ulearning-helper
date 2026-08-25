@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,6 +20,28 @@ from bridge import backend, handle  # noqa: E402,F401
 
 
 SHUTDOWN_EVENT = threading.Event()
+CLIENT_CLOSED_EVENT = threading.Event()
+CLIENT_STATE_LOCK = threading.Lock()
+CLIENT_LAST_SEEN = 0.0
+
+
+def mark_client_active() -> None:
+    global CLIENT_LAST_SEEN
+    with CLIENT_STATE_LOCK:
+        CLIENT_LAST_SEEN = time.monotonic()
+    CLIENT_CLOSED_EVENT.clear()
+
+
+def client_last_seen() -> float:
+    with CLIENT_STATE_LOCK:
+        return CLIENT_LAST_SEEN
+
+
+def reset_client_state() -> None:
+    global CLIENT_LAST_SEEN
+    with CLIENT_STATE_LOCK:
+        CLIENT_LAST_SEEN = 0.0
+    CLIENT_CLOSED_EVENT.clear()
 
 
 class LocalApiHandler(BaseHTTPRequestHandler):
@@ -33,6 +56,14 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "未找到接口"})
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.path == "/api/heartbeat":
+            mark_client_active()
+            self._send_json(HTTPStatus.OK, {"ok": True})
+            return
+        if self.path == "/api/client-closed":
+            CLIENT_CLOSED_EVENT.set()
+            self._send_json(HTTPStatus.OK, {"ok": True})
+            return
         if self.path != "/api/command":
             self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "未找到接口"})
             return
@@ -45,6 +76,7 @@ class LocalApiHandler(BaseHTTPRequestHandler):
             payload = request.get("payload") or {}
             if not isinstance(payload, dict):
                 raise ValueError("payload 必须是对象")
+            mark_client_active()
             if command == "shutdown_app":
                 self._send_json(HTTPStatus.OK, {"ok": True})
                 SHUTDOWN_EVENT.set()

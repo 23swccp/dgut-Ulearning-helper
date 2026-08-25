@@ -12,7 +12,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.request import urlopen
 
-from web_server import LocalApiHandler, SHUTDOWN_EVENT, backend
+from web_server import CLIENT_CLOSED_EVENT, LocalApiHandler, SHUTDOWN_EVENT, backend, client_last_seen, reset_client_state
 
 
 ROOT = Path(__file__).resolve().parent
@@ -80,6 +80,7 @@ def show_log_tail() -> None:
 def main() -> int:
     check_only = "--check" in sys.argv
     SHUTDOWN_EVENT.clear()
+    reset_client_state()
     npm = shutil.which("npm.cmd") or shutil.which("npm")
     if not npm:
         print("ERROR: Node.js/npm was not found in PATH.")
@@ -123,10 +124,26 @@ def main() -> int:
         if not backend.start_browser(web_url):
             raise RuntimeError("Could not start a Chromium debug browser.")
         print("The UI has been opened in the debug browser.")
-        print("Keep this window open. Press Ctrl+C to stop the local services.")
+        print("Close the frontend tab to stop the local services automatically.")
+        print("You can also enter 'kill' in the web terminal or press Ctrl+C here.")
 
+        client_connected = False
+        close_requested_at: float | None = None
         while vite.poll() is None and not SHUTDOWN_EVENT.wait(0.5):
-            pass
+            last_seen = client_last_seen()
+            if last_seen and not client_connected:
+                client_connected = True
+                print("Frontend tab connected; heartbeat monitoring is active.")
+            if CLIENT_CLOSED_EVENT.is_set():
+                close_requested_at = close_requested_at or time.monotonic()
+                if time.monotonic() - close_requested_at >= 5:
+                    print("Frontend tab closed; stopping local services.")
+                    return 0
+            else:
+                close_requested_at = None
+            if client_connected and time.monotonic() - last_seen >= 90:
+                print("Frontend heartbeat timed out; stopping local services.")
+                return 0
         if SHUTDOWN_EVENT.is_set():
             print("Shutdown requested from the web terminal.")
             return 0
