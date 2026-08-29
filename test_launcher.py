@@ -2,28 +2,103 @@
 
 import json
 import socket
+import tempfile
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from unittest.mock import patch
 from urllib.request import Request, urlopen
 
 import browser_launcher
 from browser_launcher import choose_frontend_port
-from web_server import CLIENT_CLOSED_EVENT, LocalApiHandler, SHUTDOWN_EVENT, client_last_seen, reset_client_state
+from web_server import (
+    CLIENT_CLOSED_EVENT, LocalApiHandler, SHUTDOWN_EVENT, allowed_cors_origin,
+    client_last_seen, reset_client_state,
+)
 
 
 class BrowserLauncherTests(unittest.TestCase):
-    def test_terminal_kill_command_is_echoed_and_parsed(self):
-        if not hasattr(browser_launcher, "msvcrt"):
-            self.skipTest("Windows console test")
-        with patch.object(browser_launcher.msvcrt, "kbhit", return_value=True), patch.object(
-            browser_launcher.msvcrt, "getwch", side_effect=list("kill\r")
-        ), patch("builtins.print") as output:
-            buffer, command = browser_launcher.poll_terminal_command("")
-        self.assertEqual(buffer, "")
-        self.assertEqual(command, "kill")
-        self.assertGreaterEqual(output.call_count, 5)
+    def test_missing_heartbeat_stops_service_after_short_grace_period(self):
+        self.assertFalse(browser_launcher.client_connection_expired(False, 0, now=100))
+        self.assertFalse(browser_launcher.client_connection_expired(True, 90.1, now=100))
+        self.assertTrue(browser_launcher.client_connection_expired(True, 90.0, now=100))
+
+    @patch("browser_launcher.time.sleep")
+    @patch("builtins.print")
+    def test_duplicate_instance_notice_stays_visible(self, output, sleep):
+        browser_launcher.show_already_running_notice()
+        self.assertIn("请勿重复打开", output.call_args_list[0].args[0])
+        self.assertIn("4 秒后", output.call_args_list[1].args[0])
+        sleep.assert_called_once_with(browser_launcher.DUPLICATE_NOTICE_SECONDS)
+
+    def test_cors_origin_requires_exact_loopback_host_and_allowed_port(self):
+        self.assertEqual(allowed_cors_origin("http://localhost:1420"), "http://localhost:1420")
+        self.assertEqual(allowed_cors_origin("http://127.0.0.1:8765"), "http://127.0.0.1:8765")
+        self.assertEqual(allowed_cors_origin("http://127.0.0.1.evil.example:1420"), "http://127.0.0.1:1420")
+        self.assertEqual(allowed_cors_origin("http://localhost.evil.example:1420"), "http://127.0.0.1:1420")
+        self.assertEqual(allowed_cors_origin("http://localhost:9999"), "http://127.0.0.1:1420")
+
+    @patch("builtins.print")
+    def test_startup_help_precedes_two_separator_lines(self, output):
+        browser_launcher.print_startup_help()
+        lines = [call.args[0] for call in output.call_args_list]
+        self.assertIn("Edge → Chrome → 其他 Chromium", lines[0])
+        self.assertEqual(lines[-2], "-" * 72)
+        self.assertEqual(lines[-1], "-" * 72)
+
+    @patch("browser_launcher.backend.find_browser", return_value=(None, None))
+    def test_frontend_requests_terminal_setup_when_detection_fails(self, _find_browser):
+        self.assertEqual(browser_launcher.open_frontend("http://127.0.0.1:1420"), "manual")
+
+    @patch("browser_launcher.backend.start_browser", return_value=True)
+    @patch("browser_launcher.backend.update_settings")
+    @patch("browser_launcher.backend.find_browser", return_value=(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe", "Microsoft Edge"))
+    def test_frontend_reports_and_saves_detected_browser(self, _find_browser, update_settings, start_browser):
+        self.assertEqual(browser_launcher.open_frontend("http://127.0.0.1:1420"), "debug")
+        update_settings.assert_called_once_with(
+            browser_name="Microsoft Edge",
+            browser_path=r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        )
+        start_browser.assert_called_once_with("http://127.0.0.1:1420")
+
+    @patch("browser_launcher.backend.start_browser")
+    @patch("browser_launcher.backend.update_settings")
+    @patch("browser_launcher.backend.find_browser", return_value=(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe", "Microsoft Edge"))
+    def test_browser_can_be_prepared_without_opening_a_page(self, _find_browser, _update_settings, start_browser):
+        self.assertEqual(browser_launcher.open_frontend(""), "debug")
+        start_browser.assert_not_called()
+
+    @patch("browser_launcher.backend.update_settings")
+    def test_terminal_accepts_a_quoted_chrome_executable(self, update_settings):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "Chrome Folder" / "chrome.exe"
+            executable.parent.mkdir()
+            executable.touch()
+            self.assertTrue(browser_launcher.configure_browser_path(f'"{executable}"'))
+        update_settings.assert_called_once_with(browser_name="Google Chrome", browser_path=str(executable.resolve()))
+
+    @patch("browser_launcher.backend.update_settings")
+    def test_terminal_accepts_a_portable_chromium_executable(self, update_settings):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "PortableBrowser" / "browser.exe"
+            executable.parent.mkdir()
+            executable.touch()
+            self.assertTrue(browser_launcher.configure_browser_path(str(executable)))
+        update_settings.assert_called_once_with(browser_name="自定义浏览器", browser_path=str(executable.resolve()))
+
+    @patch("browser_launcher.backend.update_settings")
+    def test_terminal_setup_only_accepts_a_browser_executable_path(self, update_settings):
+        self.assertFalse(browser_launcher.configure_browser_path("edge"))
+        self.assertFalse(browser_launcher.configure_browser_path(r"Z:\\Browser Folder\\browser.exe"))
+        update_settings.assert_not_called()
+
+    @patch("browser_launcher.configure_browser_path", side_effect=[False, True])
+    @patch("builtins.input", side_effect=['"Z:\\Browser Folder\\browser.exe"', '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"'])
+    def test_terminal_prompt_accepts_quoted_paths_and_retries(self, _input, configure):
+        self.assertTrue(browser_launcher.prompt_for_browser("http://127.0.0.1:1420"))
+        self.assertEqual(configure.call_args_list[0].args[0], '"Z:\\Browser Folder\\browser.exe"')
+        self.assertEqual(configure.call_args_list[1].args[0], '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"')
 
     def test_chooses_another_port_when_first_port_is_busy(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:

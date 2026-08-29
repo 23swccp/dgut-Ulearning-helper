@@ -1,15 +1,235 @@
 /* 设置入口嵌入终端右上角，不保留额外留白。 */
 .settings {
   top: 0;
-  right: 0;
-  width: 45px;
-  height: 45px;
+  right: auto;
+  left: 0;
+  z-index: 4;
+  width: 50px;
+  height: 39px;
   padding: 0;
   display: grid;
   place-items: center;
   border-top: 0;
+  border-left: 0;
+  border-radius: 0 0 10px 0;
+  background: #fff url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAAAnCAYAAABNJBuZAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAFNSURBVFhH7dbRbYMwEMbxL33nMgAwQL1AnAXIAM16becIC2AGqBkgLMB5APpQIVVXkpgKN27k3+NdLPGXQuLNOI4jHsCTHPxXKSQ2KSQ2KSQ2DxOyCf2HyMwYBoZzTq4AAFmWAQDKspCrRYKFWNvhVNdyfBERQSmFvd7JlZcgIVOE1trrwZgZH7aDMcb7jBTkHWkWPhARYa930FrDWivXXoKEMDOKPJfjWedzj9e3dwBAkedgZjCz/NhNq4dMD7HdklzNcs4tPjNn9ZB7SSGxSSG3DMPyX57fnJkEC/FVFDnK4ut6cuka42P1ECICEcF2nVzNIiIcjy8/ZkutHgIASin0fY/GtHI1i5nRmBanusahquTaS5C7FgA0poUxRo6vOlQVlHqWYy/BQvDtCo8r3//or/F/Lcg7cg8pJDYpJDYpJDYpJDYpJDYpJDafsGeCVgi067QAAAAASUVORK5CYII=") center / 50px 39px no-repeat;
+}
+
+.settings:hover {
+  background-color: #f7f8fa;
+}
+
+.settings:focus-visible {
+  outline: 2px solid #009b55;
+  outline-offset: -3px;
+}
+
+/* 终端采用内容流布局：输入行紧跟输出，内容超高后整体滚动。 */
+.terminal {
+  display: block;
+  overflow: auto;
+}
+
+.terminal pre {
+  min-height: 0;
+  padding-bottom: 4px;
+  overflow: visible;
+  flex: none;
+}
+
+.terminal .command {
+  min-height: 0;
+  height: auto;
+  padding: 0 70px 24px;
+  gap: 10px;
+  border-top: 0;
+  background: #fff;
+  flex: none;
+}
+
+.terminal .command b {
+  width: 16px;
+  font: 700 13px/1.75 "Cascadia Mono", monospace;
+  text-align: left;
+}
+
+.terminal .command input {
+  height: 28px;
+  padding: 0;
+  font-family: "Cascadia Mono", monospace;
+  line-height: 1.75;
+}
+
+.terminal.course-picking .command {
+  padding-bottom: 10px;
+}
+
+.course-quick-pick {
+  width: min(760px, calc(100% - 140px));
+  margin: 0 70px 28px;
+  overflow: hidden;
+  border: 1px solid #dfe4e8;
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: 0 10px 28px #1118270d;
+  font-family: "Cascadia Mono", "Microsoft YaHei UI", monospace;
+}
+
+.course-picker-head,
+.course-picker-help {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 14px;
+  color: #778195;
+  font-size: 12px;
+}
+
+.course-picker-head {
+  border-bottom: 1px solid #edf0f2;
+}
+
+.course-picker-head strong {
+  color: #374151;
+  font-size: 14px;
+}
+
+.course-picker-help {
+  justify-content: flex-start;
+  border-top: 1px solid #edf0f2;
+}
+
+.course-options {
+  max-height: 360px;
+  overflow: auto;
+  padding: 6px;
+}
+
+.course-option {
+  width: 100%;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #344054;
+  text-align: left;
+  cursor: pointer;
+}
+
+.course-option:hover,
+.course-option.active {
+  background: #eaf8f0;
+  color: #007f46;
+}
+
+.course-option > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.course-option strong,
+.course-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.course-option strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.course-option small {
+  color: #7b8495;
+  font-size: 12px;
+}
+
+.course-option code {
+  flex: none;
+  display: inline;
+  padding: 0;
+  background: transparent;
+  color: #8a94a6;
+  font-size: 12px;
+}
+
+.course-empty {
+  padding: 30px 14px;
+  color: #7b8495;
+  font-size: 13px;
+  text-align: center;
+}
+
+/* 侧边面板展开后，左侧选择模块，右侧显示对应内容。 */
+.workspace {
+  height: calc(100vh - 16px);
+  min-height: 440px;
+  display: flex;
+}
+
+.workspace-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+.workspace-content > .terminal,
+.workspace-content > .settings-body {
+  width: 100%;
+  height: 100%;
+}
+
+.workspace-content > .settings-body {
+  border: 1px solid #e2e5eb;
+  border-radius: 10px;
+}
+
+.sidebar-open .workspace-content > .terminal,
+.sidebar-open .workspace-content > .settings-body {
+  border-radius: 0 10px 10px 0;
+}
+
+.module-nav {
+  flex: 0 0 auto;
+  height: 100%;
+  padding-top: 72px;
+  border: 1px solid #e2e5eb;
   border-right: 0;
-  border-radius: 0 0 0 10px;
+  border-radius: 10px 0 0 10px;
+  overflow: hidden;
+}
+
+.module-brand {
+  position: absolute;
+  top: 0;
+  left: 70px;
+  right: 14px;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  color: #2f3745;
+  font-size: 17px;
+  font-weight: 700;
+  white-space: nowrap;
+  border-bottom: 1px solid #edf0f2;
+}
+
+.settings-body h2,
+.settings-body h3 {
+  font-weight: 600;
+}
+
+.settings-body .primary,
+.settings-body .secondary,
+.settings-body .choice {
+  font-weight: 600;
 }
 
 /* 设置页使用更轻的字重，避免中文界面显得生硬、拥挤。 */
@@ -81,71 +301,221 @@
   margin-top: 14px;
 }
 
-.hint,
-.empty-courses {
+.browser-path-field,
+.log-path-row {
+  margin-top: 12px;
+}
+
+.setting-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  align-items: center;
+  gap: 18px;
+  color: #4e5768;
+  font-size: 14px;
+}
+
+.setting-field + .setting-line,
+.setting-line + .setting-line {
+  margin-top: 16px;
+}
+
+.rate-field {
+  text-align: right;
+}
+
+.settings-save {
+  padding: 4px 0 14px;
+}
+
+/* 设置页采用桌面工具常见的紧凑分组行，避免大卡片与大色块堆叠。 */
+.utility-settings {
+  max-width: 860px;
+}
+
+.utility-settings .page-intro {
+  margin-bottom: 18px;
+}
+
+.utility-settings .page-intro h2 {
+  font-size: 24px;
+  letter-spacing: -.4px;
+}
+
+.settings-surface {
+  overflow: hidden;
+  border: 1px solid #dfe3e8;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.utility-settings .card {
+  margin: 0;
+  padding: 22px 24px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.utility-settings .card + .card {
+  border-top: 1px solid #e8ebef;
+}
+
+.utility-settings .card h3 {
+  font-size: 16px;
+}
+
+.utility-settings .card > p {
+  margin-top: 3px;
+  font-size: 13px;
+}
+
+.utility-settings .card-content {
+  margin-top: 15px;
+}
+
+.browser-scan-line {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.text-button {
+  border: 0;
+  padding: 5px 0 5px 12px;
+  background: transparent;
+  color: #007f46;
+  font: 600 13px inherit;
+  cursor: pointer;
+}
+
+.text-button:disabled {
+  color: #9aa3af;
+  cursor: wait;
+}
+
+.browser-list {
+  overflow: hidden;
+  border: 1px solid #dfe3e8;
+  border-radius: 8px;
+}
+
+.browser-option {
+  width: 100%;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  padding: 9px 12px;
+  border: 0;
+  background: #fff;
+  color: #343d4a;
+  text-align: left;
+  cursor: pointer;
+}
+
+.browser-option + .browser-option {
+  border-top: 1px solid #edf0f3;
+}
+
+.browser-option:hover {
+  background: #f8faf9;
+}
+
+.browser-option.selected {
+  background: #f1f8f4;
+}
+
+.radio-dot {
+  width: 16px;
+  height: 16px;
+  display: block;
+  border: 1px solid #aeb7c3;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: inset 0 0 0 4px #fff;
+}
+
+.browser-option.selected .radio-dot {
+  border-color: #008d4e;
+  background: #008d4e;
+}
+
+.browser-option strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.custom-browser-path {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  color: #4e5768;
+  font-size: 13px;
+}
+
+.inline-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.inline-actions .secondary {
+  margin-right: 0;
+}
+
+.utility-settings .setting-line,
+.utility-settings .setting-field {
+  min-height: 40px;
+}
+
+.update-setting-line > span {
+  display: grid;
+  gap: 5px;
+}
+
+.update-setting-line strong {
+  color: #323846;
+  font-size: 14px;
+}
+
+.update-setting-line small {
+  color: #7b8495;
+  font-size: 12px;
+}
+
+.update-setting-line .secondary {
+  margin-right: 0;
+}
+
+.utility-settings .log-path-row {
+  margin-top: 12px;
+}
+
+.utility-settings .settings-save {
+  margin-top: 14px;
+}
+
+.hint {
   margin: 14px 0 0;
   color: #8190a8;
   font-size: 13px;
   line-height: 1.55;
 }
 
-.course-actions {
-  display: flex;
-  align-items: center;
+.log-path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
 }
 
-.course-actions .secondary {
+.log-path-row .secondary {
   margin-right: 0;
-}
-
-.course-list {
-  display: grid;
-  gap: 9px;
-  margin-top: 18px;
-}
-
-.course-item {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  border: 1px solid #e1e6e6;
-  border-radius: 10px;
-  padding: 13px 15px;
-  background: #fbfcfc;
-  color: #334155;
-  text-align: left;
-  cursor: pointer;
-}
-
-.course-item:hover,
-.course-item.selected {
-  border-color: #009b55;
-  background: #f0faf4;
-}
-
-.course-item span {
-  display: grid;
-  gap: 4px;
-}
-
-.course-item b {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.course-item small {
-  color: #7b8495;
-  font-size: 12px;
-}
-
-.course-item em {
-  color: #009b55;
-  font-size: 12px;
-  font-style: normal;
-  font-weight: 700;
+  white-space: nowrap;
 }
 
 .field-label {
@@ -159,4 +529,206 @@
 
 .setting-line.spaced {
   margin-top: 18px;
+}
+
+/* 桌面端全屏浏览时提高整体可读性；窄窗口仍沿用紧凑布局。 */
+@media (min-width: 901px) {
+  h1,
+  .settings-header h1 {
+    font-size: 26px;
+  }
+
+  h2 {
+    font-size: 21px;
+  }
+
+  h3 {
+    font-size: 18px;
+  }
+
+  p,
+  .hint {
+    font-size: 15px;
+  }
+
+  .terminal pre {
+    padding: 28px;
+    font-size: 16px;
+    line-height: 1.75;
+  }
+
+  .command {
+    height: 68px;
+  }
+
+  .command input {
+    font-size: 16px;
+  }
+
+  .command button,
+  .primary,
+  .secondary {
+    padding: 11px 19px;
+    font-size: 15px;
+  }
+
+  .settings-layout {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+
+  .settings-nav > p {
+    font-size: 14px;
+  }
+
+  .settings-nav button {
+    height: 49px;
+    font-size: 16px;
+  }
+
+  .settings-nav button b {
+    width: 25px;
+    font-size: 18px;
+  }
+
+  .settings-body {
+    padding: 38px 48px;
+  }
+
+  .settings-page {
+    max-width: 900px;
+  }
+
+  .choice {
+    height: 48px;
+    font-size: 15px;
+  }
+
+  .field {
+    height: 48px;
+    font-size: 15px;
+  }
+
+  .setting-line,
+  .field-label,
+  dl {
+    font-size: 16px;
+  }
+
+  code {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .toast {
+    font-size: 15px;
+  }
+}
+
+/* 刷课页：状态快照、关键事件和命令区互相独立。 */
+.learning-terminal {
+  display: block;
+  overflow: auto;
+}
+
+.course-status {
+  flex: none;
+  margin: 18px 28px 0 70px;
+  border: 1px solid #dfe5e2;
+  border-radius: 10px;
+  background: #fbfdfc;
+  font-family: "Cascadia Mono", "Microsoft YaHei UI", monospace;
+}
+
+.course-status-head {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 52px 7px 12px;
+  border-bottom: 1px solid #e8ecea;
+  color: #657083;
+  font-size: 12px;
+}
+
+.run-state { color: #556070; }
+.run-state.success, .connected { color: #00884b; }
+.run-state.warning, .disconnected, .status-item.warning strong { color: #b26a00; }
+.status-item.success strong { color: #00884b; }
+.course-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #2f3948; font-weight: 600; }
+
+.course-status-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.7fr) repeat(8, minmax(68px, 1fr));
+  gap: 1px;
+  background: #e9eeeb;
+}
+
+.status-item {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  background: #fff;
+}
+
+.status-item span { color: #8a93a2; font-size: 10px; }
+.status-item strong { overflow: hidden; color: #374151; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.status-read-warning { padding: 6px 10px; border-top: 1px solid #f1dec2; background: #fff8ed; color: #9b5b00; font-size: 11px; }
+.page-plan { display: flex; gap: 10px; align-items: baseline; min-width: 0; padding: 8px 10px; border-top: 1px solid #eef0f3; color: #657084; font-size: 12px; }
+.page-plan span { flex: 0 0 auto; color: #8a94a5; }
+.page-plan strong { min-width: 0; color: #34405a; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.course-event-log {
+  flex: none;
+  min-height: 0;
+  overflow: visible;
+  padding: 18px 28px 8px 70px;
+  font: 13px/1.7 "Cascadia Mono", "Microsoft YaHei UI", monospace;
+}
+
+.course-event {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 2px 0;
+  color: #384354;
+}
+
+.course-event time { color: #929baa; }
+.course-event.success span { color: #00884b; }
+.course-event.warning span { color: #a96200; }
+.course-event.error span { color: #c23b3b; }
+.course-event code { display: inline; padding: 1px 5px; background: #f1f3f5; color: #8a93a2; font-size: 10px; }
+.course-local-log { color: #818b9b; }
+.event-empty { padding: 16px 0; color: #9aa3b1; }
+
+.learning-terminal .command {
+  flex: none;
+  padding-top: 0;
+  border-top: 0;
+}
+
+@media (max-width: 1100px) {
+  .course-status-grid { grid-template-columns: repeat(4, minmax(100px, 1fr)); }
+}
+
+/* 为左上角入口留出空间，开合过程中正文不会发生二次跳动。 */
+.terminal pre {
+  padding-left: 70px;
+  padding-bottom: 4px;
+}
+
+.terminal pre,
+.terminal .command b,
+.terminal .command input {
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+@media (min-width: 901px) {
+  .terminal pre,
+  .terminal .command b,
+  .terminal .command input {
+    font-size: 16px;
+  }
 }

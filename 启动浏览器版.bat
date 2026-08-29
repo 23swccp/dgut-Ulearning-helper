@@ -1,5 +1,13 @@
 @echo off
 setlocal
+chcp 65001 >nul 2>nul
+if errorlevel 1 (
+  chcp 936 >nul 2>nul
+  set "YXY_CONSOLE_ENCODING=gbk"
+) else (
+  set "YXY_CONSOLE_ENCODING=utf-8"
+)
+set "PYTHONUTF8=1"
 set "ROOT=%~dp0"
 cd /d "%ROOT%"
 

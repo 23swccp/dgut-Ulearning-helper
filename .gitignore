@@ -5,6 +5,7 @@ auth.json
 account.json
 签到记录.md
 browser-launcher.log
+browser-service.log
 
 # Python 生成文件
 __pycache__/
@@ -13,3 +14,12 @@ __pycache__/
 # 前端生成文件
 web/node_modules/
 web/dist/
+
+# 自动更新运行数据
+.update/
+update-result.json
+update_failures.json
+release/
+
+# 本地逆向分析材料（体积大，不属于应用发布内容）
+/优学院手机端源码/

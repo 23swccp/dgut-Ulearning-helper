@@ -4,30 +4,91 @@ from __future__ import annotations
 
 import threading
 from collections import deque
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from yxy_backend import SignBackend
+from yxy_updater import UpdateManager
+from version import APP_NAME, APP_VERSION, GITHUB_REPO, RELEASE_API
 
 
 ROOT = Path(__file__).resolve().parent
-EVENTS: deque[dict[str, str]] = deque(maxlen=1000)
-EVENT_LOCK = threading.Lock()
+class EventBuffer:
+    """线程安全的有限事件流；读取使用游标，不会消费事件。"""
+
+    def __init__(self, maxlen: int = 1500) -> None:
+        self._events: deque[dict[str, Any]] = deque(maxlen=maxlen)
+        self._lock = threading.Lock()
+        self._seq = 0
+        self._default_session_id = f"app-{datetime.now().astimezone():%Y%m%d}-{uuid4().hex[:8]}"
+
+    def emit_event(
+        self,
+        code: str,
+        level: str,
+        category: str,
+        message: str,
+        *,
+        session_id: str = "",
+        page: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            self._seq += 1
+            event = {
+                "seq": self._seq,
+                "time": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "sessionId": session_id or self._default_session_id,
+                "code": str(code),
+                "level": str(level),
+                "category": str(category),
+                "message": str(message),
+                "page": dict(page or {}),
+                "data": dict(data or {}),
+            }
+            self._events.append(event)
+            return dict(event)
+
+    def get_events(self, after_seq: int = 0) -> dict[str, Any]:
+        with self._lock:
+            events = [dict(event) for event in self._events if int(event["seq"]) > after_seq]
+            return {"events": events, "latestSeq": self._seq}
+
+
+EVENT_BUFFER = EventBuffer()
 
 
 def emit(message: str, kind: str) -> None:
-    with EVENT_LOCK:
-        EVENTS.append({"message": message, "kind": kind})
+    """旧字符串日志兼容入口；课程内部日志默认归入详细日志。"""
+    is_course = kind.startswith("course:") or message.startswith(("[刷课]", "[yxy]"))
+    raw_level = kind.split(":", 1)[-1]
+    level = {"muted": "info", "warn": "warning"}.get(raw_level, raw_level)
+    EVENT_BUFFER.emit_event(
+        "DEBUG_LOG" if is_course else "LEGACY_LOG",
+        level if level in {"info", "success", "warning", "error"} else "info",
+        "debug" if is_course else "general",
+        message,
+        data={"legacyKind": kind},
+    )
 
 
-def take_events() -> list[dict[str, str]]:
-    with EVENT_LOCK:
-        items = list(EVENTS)
-        EVENTS.clear()
-    return items
+def emit_event(code: str, level: str, category: str, message: str, **kwargs: Any) -> dict[str, Any]:
+    return EVENT_BUFFER.emit_event(code, level, category, message, **kwargs)
 
 
-backend = SignBackend(emit=emit, root=ROOT)
+backend = SignBackend(emit=emit, emit_event=emit_event, root=ROOT)
+
+# 应用内自动更新：状态持久化在 .update/state.json，前端通过 get_update_status 轮询。
+update_manager = UpdateManager(
+    ROOT,
+    version=APP_VERSION,
+    release_api=RELEASE_API,
+    emit_event=emit_event,
+    debug_port=lambda: backend.config.debug_port,
+)
+update_manager.restore()
 
 
 def courses() -> list[dict[str, Any]]:
@@ -36,7 +97,11 @@ def courses() -> list[dict[str, Any]]:
 
 def handle(command: str, payload: dict[str, Any]) -> dict[str, Any]:
     if command == "get_events":
-        return {"ok": True, "events": take_events()}
+        try:
+            after_seq = max(0, int(payload.get("afterSeq", 0)))
+        except (TypeError, ValueError):
+            after_seq = 0
+        return {"ok": True, **EVENT_BUFFER.get_events(after_seq)}
     if command == "load_saved_courses":
         return {"ok": backend.load_saved_courses(), "courses": courses()}
     if command == "start_browser":
@@ -62,8 +127,8 @@ def handle(command: str, payload: dict[str, Any]) -> dict[str, Any]:
     if command == "start_monitor":
         if backend.selected_course is None:
             return {"ok": False, "error": "尚未选择课程"}
-        backend.start_monitor()
-        return {"ok": True}
+        started = backend.start_monitor()
+        return {"ok": started, "error": "签到监测已在运行" if not started else ""}
     if command == "stop_monitor":
         backend.stop_monitor()
         return {"ok": True}
@@ -78,8 +143,12 @@ def handle(command: str, payload: dict[str, Any]) -> dict[str, Any]:
             return {"ok": True}
         except (TypeError, ValueError) as error:
             return {"ok": False, "error": str(error)}
+    if command == "get_course_helper_status":
+        return {"ok": True, "status": backend.course_helper_status()}
     if command == "get_settings":
         return {"ok": True, "config": backend.config.to_mapping()}
+    if command == "detect_browsers":
+        return {"ok": True, "browsers": backend.detect_browsers()}
     if command == "get_account_login_status":
         return {"ok": True, "account": backend.account_login_status()}
     if command == "update_account_login":
@@ -92,4 +161,30 @@ def handle(command: str, payload: dict[str, Any]) -> dict[str, Any]:
     if command == "update_settings":
         backend.update_settings(**payload)
         return {"ok": True, "config": backend.config.to_mapping()}
+    if command == "open_log":
+        try:
+            path = backend.open_log_file(str(payload.get("path", "")))
+            return {"ok": True, "path": str(path)}
+        except OSError as error:
+            return {"ok": False, "error": f"打开日志失败：{error}"}
+    if command == "get_app_info":
+        return {"ok": True, "info": {"appName": APP_NAME, "version": APP_VERSION, "repo": GITHUB_REPO}}
+    if command == "get_update_status":
+        return {"ok": True, "update": update_manager.snapshot()}
+    if command == "check_update":
+        def check() -> None:
+            update_manager.check(manual=True)
+
+        threading.Thread(target=check, name="update-check", daemon=True).start()
+        return {"ok": True}
+    if command == "download_update":
+        return update_manager.start_download()
+    if command == "install_update":
+        return update_manager.install()
+    if command == "mark_update_read":
+        update_manager.mark_read()
+        return {"ok": True}
+    if command == "ack_update_failure":
+        update_manager.ack_failure()
+        return {"ok": True}
     return {"ok": False, "error": f"未知命令：{command}"}
