@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 
 
 APP_NAME = "优学院助手"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 ROOT = Path(__file__).resolve().parent
 
 
