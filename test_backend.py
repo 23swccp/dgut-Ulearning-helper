@@ -1,10 +1,40 @@
 """不访问学校接口的基础回归测试。运行：python -m unittest -v test_backend.py"""
 
+import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from yxy_backend import Activity, AppConfig, Course, SignBackend
+from yxy_backend import Activity, ApiClient, AppConfig, Course, MonitorState, SignBackend
+from backend_commands import EventBuffer
+
+
+class EventBufferTests(unittest.TestCase):
+    def test_structured_fields_and_monotonic_sequence(self):
+        events = EventBuffer(maxlen=10)
+        first = events.emit_event("SESSION_STARTED", "success", "session", "开始")
+        second = events.emit_event("PAGE_ENTERED", "info", "navigation", "进入", page={"id": "2"})
+        self.assertLess(first["seq"], second["seq"])
+        for field in ("seq", "time", "sessionId", "code", "level", "category", "message", "page", "data"):
+            self.assertIn(field, first)
+
+    def test_cursor_does_not_consume_or_repeat_events(self):
+        events = EventBuffer(maxlen=10)
+        one = events.emit_event("A", "info", "test", "one")
+        two = events.emit_event("B", "info", "test", "two")
+        self.assertEqual([item["seq"] for item in events.get_events(0)["events"]], [one["seq"], two["seq"]])
+        self.assertEqual([item["seq"] for item in events.get_events(one["seq"])["events"]], [two["seq"]])
+        self.assertEqual(events.get_events(two["seq"])["events"], [])
+
+    def test_ring_buffer_is_bounded_without_resetting_latest_sequence(self):
+        events = EventBuffer(maxlen=2)
+        for index in range(4):
+            events.emit_event("TEST", "info", "test", str(index))
+        result = events.get_events(0)
+        self.assertEqual([item["seq"] for item in result["events"]], [3, 4])
+        self.assertEqual(result["latestSeq"], 4)
 
 
 class BackendTests(unittest.TestCase):
@@ -15,6 +45,32 @@ class BackendTests(unittest.TestCase):
         config = AppConfig.from_mapping({"poll_interval": 8, "unexpected": "ignored"}, Path("."))
         self.assertEqual(config.poll_interval, 8)
         self.assertFalse(hasattr(config, "unexpected"))
+
+    def test_config_normalizes_invalid_values_without_user_interaction(self):
+        config = AppConfig.from_mapping(
+            {
+                "debug_port": "invalid",
+                "poll_interval": 0,
+                "save_log": "false",
+                "lat": float("nan"),
+                "lng": -1000,
+                "course_playback_rate": 99,
+            },
+            Path("."),
+        )
+        self.assertEqual(config.debug_port, 9222)
+        self.assertEqual(config.poll_interval, 2)
+        self.assertFalse(config.save_log)
+        self.assertEqual(config.lat, 23.0432)
+        self.assertEqual(config.lng, -180)
+        self.assertEqual(config.course_playback_rate, 16)
+
+    def test_api_client_retries_safe_gets_but_not_posts(self):
+        client = ApiClient({"User-Agent": "test"})
+        retry = client.session.get_adapter("https://").max_retries
+        self.assertIn("GET", retry.allowed_methods)
+        self.assertNotIn("POST", retry.allowed_methods)
+        self.assertIn(429, retry.status_forcelist)
 
     def test_course_selection_accepts_one_exact_course_only(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -38,10 +94,140 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(content.count("测试课程"), 2)
             self.assertIn("HTTP/status: 200", content)
 
+    def test_log_redacts_common_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            backend = self.make_backend(root)
+            log_path = root / "签到记录.md"
+            backend.update_settings(log_path=str(log_path))
+            backend._write_sign_log("测试课程", "一键签到", ["Authorization: secret-token", "password=hunter2"])
+            content = log_path.read_text(encoding="utf-8")
+            self.assertNotIn("secret-token", content)
+            self.assertNotIn("hunter2", content)
+            self.assertGreaterEqual(content.count("[已隐藏]"), 2)
+
+    def test_config_writes_atomically_without_leaving_temporary_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            backend = self.make_backend(root)
+            backend.update_settings(poll_interval=8)
+            saved = json.loads((root / "config.json").read_text(encoding="utf-8"))
+            self.assertEqual(AppConfig.from_mapping(saved, root).poll_interval, 8)
+            self.assertEqual(list(root.glob(".config.json.*.tmp")), [])
+
+    def test_open_log_creates_file_and_uses_default_app(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            backend = self.make_backend(root)
+            with patch("yxy_backend.os.startfile", create=True) as startfile:
+                path = backend.open_log_file("logs/签到记录.md")
+            self.assertEqual(path, (root / "logs" / "签到记录.md").resolve())
+            self.assertTrue(path.is_file())
+            startfile.assert_called_once_with(str(path))
+
     def test_activity_model_keeps_raw_extra_fields(self):
         activity = Activity.from_api({"relationId": 1, "scoreType": 3, "custom": "kept"})
         self.assertEqual(activity.score_type, 3)
         self.assertEqual(activity.raw["custom"], "kept")
+
+    def test_browser_launch_uses_debug_mode_and_opens_requested_url(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            browser = root / "msedge.exe"
+            browser.touch()
+            backend = self.make_backend(root)
+            backend.config.browser_name = "Microsoft Edge"
+            backend.config.browser_path = str(browser)
+            url = "http://127.0.0.1:1420"
+
+            with patch.object(backend, "_open_debug_tab", return_value=False), patch("yxy_backend.subprocess.Popen") as popen:
+                self.assertTrue(backend.start_browser(url))
+
+            command = popen.call_args.args[0]
+            self.assertIn("--remote-debugging-port=9222", command)
+            self.assertIn(url, command)
+
+    def test_browser_detection_reports_paths_and_prefers_edge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            backend = self.make_backend(Path(directory))
+            backend.config.browser_name = ""
+            backend.config.browser_path = ""
+            checked = []
+
+            def exists(path):
+                return str(path).lower().endswith(r"microsoft\edge\application\msedge.exe")
+
+            with patch("yxy_backend.Path.is_file", new=exists):
+                path, name = backend.find_browser(progress=checked.append)
+
+            self.assertEqual(name, "Microsoft Edge")
+            self.assertTrue(path.lower().endswith(r"microsoft\edge\application\msedge.exe"))
+            self.assertEqual(checked[0], path)
+
+    def test_browser_detection_returns_every_installed_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            edge = root / "msedge.exe"
+            chrome = root / "chrome.exe"
+            edge.touch()
+            chrome.touch()
+            backend = self.make_backend(root)
+            with patch.object(backend, "browser_candidates", return_value=[
+                ("Microsoft Edge", [str(edge)]),
+                ("Google Chrome", [str(chrome)]),
+                ("Brave", [str(root / "missing-brave.exe")]),
+            ]):
+                detected = backend.detect_browsers()
+            self.assertEqual(detected, [
+                {"name": "Microsoft Edge", "path": str(edge.resolve())},
+                {"name": "Google Chrome", "path": str(chrome.resolve())},
+            ])
+
+    def test_explicit_custom_browser_path_takes_priority(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            custom = root / "portable-browser.exe"
+            custom.touch()
+            backend = self.make_backend(root)
+            backend.config.browser_name = "自定义浏览器"
+            backend.config.browser_path = str(custom)
+            path, name = backend.find_browser()
+            self.assertEqual((path, name), (str(custom), "自定义浏览器"))
+
+    def test_optional_account_login_is_saved_separately_and_can_be_cleared(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            backend = self.make_backend(root)
+            self.assertFalse(backend.update_account_login("", "", True))
+            self.assertTrue(backend.update_account_login("20260001", "test-password", True))
+            self.assertEqual(backend.account_login_status(), {"enabled": True, "username": "20260001", "has_password": True})
+            self.assertTrue((root / "account.json").is_file())
+            self.assertTrue(backend.update_account_login("", "", True))
+            self.assertTrue(backend.update_account_login("", "", False))
+            self.assertFalse((root / "account.json").exists())
+
+    def test_monitor_is_single_instance_and_returns_to_idle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            backend = self.make_backend(Path(directory))
+            backend.selected_course = Course(101, "数据结构")
+            entered = threading.Event()
+
+            def poll_once(_checked):
+                entered.set()
+                backend.stop_event.wait(1)
+
+            with patch.object(backend, "_poll_once", side_effect=poll_once) as poll:
+                self.assertTrue(backend.start_monitor())
+                self.assertTrue(entered.wait(1))
+                first_thread = backend.monitor_thread
+                self.assertFalse(backend.start_monitor())
+                self.assertIs(backend.monitor_thread, first_thread)
+                backend.stop_monitor()
+                first_thread.join(1)
+
+            self.assertEqual(poll.call_count, 1)
+            self.assertEqual(backend.monitor_state, MonitorState.IDLE)
+            self.assertIsNone(backend.monitor_thread)
 
 
 if __name__ == "__main__":

@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
+from http.cookies import SimpleCookie
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
+from urllib.parse import quote, unquote
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from websocket import create_connection
 
 
@@ -32,18 +39,59 @@ class AppConfig:
     lat: float = 23.0432
     lng: float = 113.3993
     address: str = "东莞理工学院"
-    # 课件学习辅助：仅控制播放、文档阅读与章节衔接；测验由用户自行完成。
+    # 课件学习辅助：播放、文档阅读、章节衔接与测验自动作答（实验性，占位选项）。
     course_playback_rate: float = 8.0
     course_auto_dismiss_dialog: bool = True
     course_document_scroll_enabled: bool = True
     course_document_scroll_interval: float = 3.0
     course_document_scroll_speed: float = 3.0
 
+    @staticmethod
+    def _number(value, default: float, minimum: float, maximum: float, *, integer: bool = False):
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            number = default
+        if not math.isfinite(number):
+            number = default
+        number = min(max(number, minimum), maximum)
+        return int(number) if integer else number
+
+    @staticmethod
+    def _boolean(value, default: bool) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "off"}:
+                return False
+        return default
+
     @classmethod
     def from_mapping(cls, values: dict, root: Path) -> "AppConfig":
         defaults = cls(log_path=str(root / "签到记录.md"))
-        allowed = {key: value for key, value in values.items() if key in defaults.__dataclass_fields__}
-        return cls(**(asdict(defaults) | allowed))
+        if not isinstance(values, dict):
+            values = {}
+        merged = asdict(defaults) | {
+            key: value for key, value in values.items() if key in defaults.__dataclass_fields__
+        }
+        merged.update(
+            debug_port=cls._number(merged["debug_port"], defaults.debug_port, 1024, 65535, integer=True),
+            poll_interval=cls._number(merged["poll_interval"], defaults.poll_interval, 2, 3600, integer=True),
+            save_log=cls._boolean(merged["save_log"], defaults.save_log),
+            lat=cls._number(merged["lat"], defaults.lat, -90, 90),
+            lng=cls._number(merged["lng"], defaults.lng, -180, 180),
+            course_playback_rate=cls._number(merged["course_playback_rate"], defaults.course_playback_rate, 1, 16),
+            course_auto_dismiss_dialog=cls._boolean(merged["course_auto_dismiss_dialog"], defaults.course_auto_dismiss_dialog),
+            course_document_scroll_enabled=cls._boolean(merged["course_document_scroll_enabled"], defaults.course_document_scroll_enabled),
+            course_document_scroll_interval=cls._number(merged["course_document_scroll_interval"], defaults.course_document_scroll_interval, 0.5, 60),
+            course_document_scroll_speed=cls._number(merged["course_document_scroll_speed"], defaults.course_document_scroll_speed, 1, 3),
+        )
+        for key in ("browser_path", "browser_name", "log_path", "address"):
+            merged[key] = str(merged[key] if merged[key] is not None else getattr(defaults, key))
+        return cls(**merged)
 
     def to_mapping(self) -> dict:
         return asdict(self)
@@ -98,21 +146,39 @@ class ApiClient:
 
     def __init__(self, headers: dict) -> None:
         self.headers = headers
+        self.session = requests.Session()
+        retry = Retry(
+            total=3,
+            connect=3,
+            read=2,
+            status=2,
+            backoff_factor=0.4,
+            status_forcelist=(429, 502, 503, 504),
+            allowed_methods=frozenset({"GET"}),
+            respect_retry_after_header=True,
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
 
     def request(self, method: str, url: str, **kwargs) -> requests.Response:
         kwargs.setdefault("headers", self.headers)
-        kwargs.setdefault("timeout", 10)
-        response = requests.request(method, url, **kwargs)
+        kwargs.setdefault("timeout", (5, 10))
+        response = self.session.request(method, url, **kwargs)
         response.raise_for_status()
         return response
 
     def json(self, method: str, url: str, **kwargs) -> dict:
         try:
-            return self.request(method, url, **kwargs).json()
+            value = self.request(method, url, **kwargs).json()
         except requests.RequestException as error:
             raise RuntimeError(f"网络或认证错误：{error}") from error
         except ValueError as error:
             raise RuntimeError("服务返回了无法解析的数据") from error
+        if not isinstance(value, dict):
+            raise RuntimeError("服务返回的数据结构不符合预期")
+        return value
 
 # 开源源码不保存任何个人登录信息。发布版会在当前用户的 AppData 中保存本地缓存。
 # 开发时如需临时令牌，请通过环境变量 YXY_TOKEN 提供，切勿提交到仓库。
@@ -121,8 +187,14 @@ USER_ID = None
 
 
 class SignBackend:
-    def __init__(self, emit: Callable[[str, str], None], root: Path | None = None) -> None:
+    def __init__(
+        self,
+        emit: Callable[[str, str], None],
+        root: Path | None = None,
+        emit_event: Callable[..., dict[str, Any]] | None = None,
+    ) -> None:
         self.emit = emit
+        self.emit_event = emit_event
         self.root = root or Path(__file__).resolve().parent
         self.config_path = self.root / "config.json"
         self.config: AppConfig = self._load_config()
@@ -134,6 +206,8 @@ class SignBackend:
         self.selected_course: Course | None = None
         self.stop_event = threading.Event()
         self.browser_start_lock = threading.Lock()
+        self.monitor_lock = threading.Lock()
+        self.monitor_thread: threading.Thread | None = None
         self.monitor_state = MonitorState.IDLE
         self.headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Content-Type": "application/json;charset=UTF-8", "Origin": "https://lms.dgut.edu.cn", "Referer": "https://lms.dgut.edu.cn/"}
         if self.token:
@@ -157,14 +231,90 @@ class SignBackend:
         except (OSError, json.JSONDecodeError):
             return {}
 
+    def _account_path(self) -> Path:
+        """账号密码仅作为可选的本机重新登录凭据，不写进源码或 config.json。"""
+        return self.root / "account.json"
+
+    def _load_account(self) -> dict:
+        try:
+            values = json.loads(self._account_path().read_text(encoding="utf-8"))
+            return values if isinstance(values, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def account_login_status(self) -> dict:
+        """只向前端返回是否已保存密码，绝不返回密码本身。"""
+        account = self._load_account()
+        return {
+            "enabled": bool(account.get("enabled")),
+            "username": str(account.get("username", "")),
+            "has_password": bool(account.get("password")),
+        }
+
+    def update_account_login(self, username: str, password: str, enabled: bool) -> bool:
+        """保存或清除可选的账号密码自动重新登录设置。"""
+        path = self._account_path()
+        if not enabled:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as error:
+                self._log(f"清除账号登录设置失败：{error}", "warn")
+                return False
+            self._log("已关闭账号密码自动重新登录，并清除本机保存的账号信息。", "success")
+            return True
+
+        previous = self._load_account()
+        username = username.strip() or str(previous.get("username", "")).strip()
+        password = password or str(previous.get("password", ""))
+        if not username or not password:
+            self._log("启用账号密码自动重新登录前，请填写学号和密码。", "warn")
+            return False
+        try:
+            self._write_json_atomic(
+                path,
+                {"enabled": True, "username": username, "password": password},
+            )
+        except OSError as error:
+            self._log(f"保存账号登录设置失败：{error}", "warn")
+            return False
+        self._log("已保存账号密码自动重新登录设置；仅会在登录缓存失效时尝试一次。", "success")
+        return True
+
     def save_config(self) -> None:
-        self.config_path.write_text(json.dumps(self.config.to_mapping(), ensure_ascii=False, indent=2), encoding="utf-8")
+        self._write_json_atomic(self.config_path, self.config.to_mapping())
 
     def update_settings(self, **values) -> None:
-        for key, value in values.items():
-            if key in self.config.__dataclass_fields__:
-                setattr(self.config, key, value)
+        self.config = AppConfig.from_mapping(self.config.to_mapping() | values, self.root)
         self.save_config()
+
+    @staticmethod
+    def _write_json_atomic(path: Path, values: dict) -> None:
+        """先写同目录临时文件再替换，避免进程中断留下半个 JSON。"""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+        try:
+            temporary.write_text(json.dumps(values, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def open_log_file(self, value: str = "") -> Path:
+        """创建并用系统默认程序打开当前日志文件。"""
+        path = Path(value.strip() or self.config.log_path).expanduser()
+        if not path.is_absolute():
+            path = self.root / path
+        path = path.resolve()
+        if path.exists() and path.is_dir():
+            raise OSError(f"日志路径指向文件夹：{path}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch(exist_ok=True)
+        if os.name == "nt":
+            os.startfile(str(path))
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+        return path
 
     def _fetch_courses(self) -> list[Course]:
         data = self.api.json("GET", f"{LMS_BASE}/courses/students", params={"keyword": "", "publishStatus": 1, "type": 1, "pn": 1, "ps": 50})
@@ -179,7 +329,11 @@ class SignBackend:
         """延迟创建课程页控制器，避免普通签到流程依赖浏览器课件页。"""
         if self._course_controller is None:
             from yxy_course import CourseController
-            self._course_controller = CourseController(self._log)
+            # 携带模块通道，前端据此将刷课输出与签到输出隔离。
+            self._course_controller = CourseController(
+                lambda text, kind: self.emit(text, f"course:{kind}"),
+                emit_event=self.emit_event,
+            )
         return self._course_controller
 
     def start_course_helper(self) -> bool:
@@ -202,94 +356,186 @@ class SignBackend:
         """在运行中调整视频播放倍速。"""
         self.course_controller.set_speed(float(rate))
 
+    def course_helper_status(self) -> dict:
+        """读取课件页实时状态；页面断连或尚未启动时也返回明确状态。"""
+        controller = self.course_controller
+        snapshot = controller.status_snapshot()
+        if not snapshot.get("running"):
+            snapshot["playbackRate"] = float(self.config.course_playback_rate)
+            snapshot.setdefault("video", {})["rate"] = float(self.config.course_playback_rate)
+        return snapshot
+
     def _persist_credentials(self) -> None:
         """把最近一次有效凭据保存到本地 auth.json，绝不修改或污染源码。"""
         try:
-            (self.root / "auth.json").write_text(
-                json.dumps({"token": self.token, "user_id": self.user_id}, ensure_ascii=False),
-                encoding="utf-8",
-            )
+            self._write_json_atomic(self.root / "auth.json", {"token": self.token, "user_id": self.user_id})
             self._log("已更新本地应用登录缓存。", "success")
         except OSError as error:
             self._log(f"保存本地登录缓存失败：{error}", "warn")
 
+    def _apply_token(self, token: str, user_id: int | None) -> None:
+        self.token = token
+        self.user_id = user_id
+        self.headers["Authorization"] = token
+        self._persist_credentials()
+
+    @staticmethod
+    def _cookie_value(response: requests.Response, name: str) -> str:
+        value = response.cookies.get(name)
+        if value:
+            return value
+        cookies = SimpleCookie()
+        cookies.load(response.headers.get("Set-Cookie", ""))
+        item = cookies.get(name)
+        return item.value if item else ""
+
+    def _relogin_with_account(self) -> bool:
+        """使用用户明确保存的账号密码重新获取 Token；每次调用只尝试一次。"""
+        account = self._load_account()
+        if not (account.get("enabled") and account.get("username") and account.get("password")):
+            return False
+        self._log("登录缓存已失效，正在尝试可选的账号密码重新登录…", "info")
+        try:
+            response = requests.post(
+                "https://application.dgut.edu.cn/appapi/user/login/app",
+                data={"loginName": account["username"], "password": account["password"], "alias": "application"},
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": self.headers["User-Agent"],
+                },
+                allow_redirects=False,
+                timeout=10,
+            )
+            if response.status_code not in (200, 302):
+                self._log(f"账号密码重新登录失败：服务器返回 {response.status_code}。", "warn")
+                return False
+            token = self._cookie_value(response, "AUTHORIZATION")
+            raw_user = self._cookie_value(response, "USERINFO")
+            if not token:
+                self._log("账号密码重新登录失败：未收到登录凭据。", "warn")
+                return False
+            try:
+                user_id = json.loads(unquote(raw_user)).get("userId") if raw_user else None
+                user_id = int(user_id) if user_id is not None else None
+            except (TypeError, ValueError, json.JSONDecodeError):
+                user_id = None
+            self._apply_token(token, user_id)
+            self._log("账号密码重新登录成功，已更新本地登录缓存。", "success")
+            return True
+        except requests.RequestException as error:
+            self._log(f"账号密码重新登录失败：{error}", "warn")
+            return False
+
+    @staticmethod
+    def _is_unauthorized(error: Exception) -> bool:
+        return "401" in str(error)
+
     def load_saved_courses(self) -> bool:
         """优先使用本地 auth.json 中保存的 Token，不启动浏览器。"""
         if not self.token:
-            self._log("本地脚本中没有已保存的登录信息。", "muted")
-            return False
+            self._log("本地没有可用的登录缓存。", "muted")
+            if not self._relogin_with_account():
+                return False
         self._log("正在使用本地保存的登录信息读取课程列表…", "info")
         try:
             self.courses = self._fetch_courses()
         except Exception as error:
             self._log(f"本地登录信息已失效：{error}", "warn")
-            return False
+            if not self._is_unauthorized(error) or not self._relogin_with_account():
+                return False
+            try:
+                self.courses = self._fetch_courses()
+            except Exception as retry_error:
+                self._log(f"重新登录后仍无法读取课程：{retry_error}", "warn")
+                return False
         if not self.courses:
             self._log("本地登录信息已失效或未读取到课程，需要重新登录。", "warn")
             return False
-        self._log(f"已读取 {len(self.courses)} 门课程：", "success")
-        for index, course in enumerate(self.courses, 1):
-            self._log(f"  {index:>2}. [{course.id}] {course.name} - {course.teacher_name}", "input")
+        self._log(f"已读取 {len(self.courses)} 门课程，请在下方选择。", "success")
         return True
 
-    def find_browser(self) -> tuple[str | None, str | None]:
-        manual = self.config.browser_path
-        expected_executables = {
-            "Microsoft Edge": "msedge.exe",
-            "Google Chrome": "chrome.exe",
-            "Brave": "brave.exe",
-        }
-        # 明确选择浏览器时，不能让之前遗留的其他浏览器路径反客为主。
-        manual_matches_choice = (
-            not self.config.browser_name
-            or Path(manual).name.lower() == expected_executables.get(self.config.browser_name, "")
-        )
-        if manual and Path(manual).is_file() and manual_matches_choice:
-            return manual, self.config.browser_name or Path(manual).stem
-        candidates = [
-            ("Microsoft Edge", [os.path.expandvars(r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe"), os.path.expandvars(r"%PROGRAMFILES%\Microsoft\Edge\Application\msedge.exe")]),
-            ("Google Chrome", [os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"), os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"), os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe")]),
-            ("Brave", [os.path.expandvars(r"%PROGRAMFILES%\BraveSoftware\Brave-Browser\Application\brave.exe"), os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe")]),
-            ("360 极速浏览器", [os.path.expandvars(r"%PROGRAMFILES(X86)%\360ChromeX\Chrome\Application\360ChromeX.exe")]),
+    def browser_candidates(self) -> list[tuple[str, list[str]]]:
+        """返回按推荐顺序排列的 Chromium 浏览器常见安装位置。"""
+        return [
+            ("Microsoft Edge", [os.path.expandvars(r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe"), os.path.expandvars(r"%PROGRAMFILES%\Microsoft\Edge\Application\msedge.exe"), os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"), r"D:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", r"D:\Program Files\Microsoft\Edge\Application\msedge.exe"]),
+            ("Google Chrome", [os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"), os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"), os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe"), r"D:\Program Files\Google\Chrome\Application\chrome.exe", r"D:\Program Files (x86)\Google\Chrome\Application\chrome.exe"]),
+            ("Brave", [os.path.expandvars(r"%PROGRAMFILES%\BraveSoftware\Brave-Browser\Application\brave.exe"), os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe"), r"D:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"]),
+            ("Vivaldi", [os.path.expandvars(r"%LOCALAPPDATA%\Vivaldi\Application\vivaldi.exe"), os.path.expandvars(r"%PROGRAMFILES%\Vivaldi\Application\vivaldi.exe")]),
+            ("Opera", [os.path.expandvars(r"%LOCALAPPDATA%\Programs\Opera\launcher.exe"), os.path.expandvars(r"%APPDATA%\Opera Software\Opera Stable\opera.exe")]),
+            ("Chromium", [os.path.expandvars(r"%LOCALAPPDATA%\Chromium\Application\chrome.exe"), os.path.expandvars(r"%PROGRAMFILES%\Chromium\Application\chrome.exe")]),
+            ("360 极速浏览器", [os.path.expandvars(r"%PROGRAMFILES(X86)%\360ChromeX\Chrome\Application\360ChromeX.exe"), os.path.expandvars(r"%LOCALAPPDATA%\360ChromeX\Chrome\Application\360ChromeX.exe"), r"D:\Program Files (x86)\360ChromeX\Chrome\Application\360ChromeX.exe"]),
         ]
-        if self.config.browser_name:
-            candidates.sort(key=lambda item: item[0] != self.config.browser_name)
-        for name, paths in candidates:
+
+    def detect_browsers(self, timeout_seconds: float = 10.0) -> list[dict[str, str]]:
+        """扫描并返回全部已安装的 Chromium 浏览器，而不是只取第一个。"""
+        deadline = time.monotonic() + max(0.1, timeout_seconds)
+        detected: list[dict[str, str]] = []
+        checked: set[str] = set()
+        for name, paths in self.browser_candidates():
             for path in paths:
+                if time.monotonic() >= deadline:
+                    return detected
+                key = os.path.normcase(os.path.normpath(path))
+                if key in checked:
+                    continue
+                checked.add(key)
+                if Path(path).is_file():
+                    detected.append({"name": name, "path": str(Path(path).resolve())})
+                    break
+        return detected
+
+    def find_browser(
+        self,
+        progress: Callable[[str], None] | None = None,
+        timeout_seconds: float = 10.0,
+    ) -> tuple[str | None, str | None]:
+        """按 Edge、Chrome、其他 Chromium 的顺序检查常见安装位置。"""
+        report = progress or (lambda _text: None)
+        deadline = time.monotonic() + max(0.1, timeout_seconds)
+        manual = self.config.browser_path
+        # 网页设置已将浏览器名称与精确路径成对保存；选中的路径优先。
+        if manual and Path(manual).is_file():
+            report(str(Path(manual)))
+            return manual, self.config.browser_name or Path(manual).stem
+        checked: set[str] = set()
+        for name, paths in self.browser_candidates():
+            for path in paths:
+                if time.monotonic() >= deadline:
+                    return None, None
+                key = os.path.normcase(os.path.normpath(path))
+                if key in checked:
+                    continue
+                checked.add(key)
+                report(path)
                 if Path(path).is_file():
                     return path, name
         return None, None
 
-    def start_browser(self) -> bool:
+    def start_browser(self, url: str = "") -> bool:
         if not self.browser_start_lock.acquire(blocking=False):
             self._log("浏览器登录正在启动，请稍候。", "muted")
             return True
         try:
-            return self._start_browser_impl()
+            return self._start_browser_impl(url)
         finally:
             self.browser_start_lock.release()
 
-    def _start_browser_impl(self) -> bool:
+    def _start_browser_impl(self, url: str = "") -> bool:
+        url = url.strip()
+        if url and self._open_debug_tab(url):
+            return True
         path, name = self.find_browser()
         if not path:
             self._log("未找到可用浏览器。请打开设置并手动选择浏览器程序。", "warn")
             return False
         port = int(self.config.debug_port)
-        process_name = Path(path).name
-        self._log(f"正在关闭 {name} 并以远程调试模式启动…", "info")
-        try:
-            subprocess.run(["taskkill", "/f", "/im", process_name], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, timeout=5, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        except subprocess.TimeoutExpired:
-            self._log(f"关闭 {name} 超时，继续尝试启动登录浏览器。", "warn")
-        except OSError as error:
-            # 打包后的无控制台进程偶尔无法执行 taskkill；这不应阻断浏览器启动。
-            self._log(f"关闭 {name} 失败，继续尝试启动登录浏览器：{error}", "warn")
+        self._log(f"正在以远程调试模式启动 {name}…", "info")
         debug_profile = self.root / "browser_profile"
         command = [path, f"--remote-debugging-port={port}", "--remote-allow-origins=*", f"--user-data-dir={debug_profile}", "--no-first-run", "--no-default-browser-check"]
+        if url:
+            command.append(url)
         try:
-            # Tauri 会接管 sidecar 的标准输出；若 Edge 继承到其中无效的
-            # Windows 句柄，会在 Popen 阶段报 Errno 22。浏览器无需终端输入输出，
-            # 因此明确丢弃这些句柄。
+            # 浏览器无需继承启动器的终端句柄，明确丢弃输入输出。
             subprocess.Popen(
                 command,
                 stdin=subprocess.DEVNULL,
@@ -304,6 +550,18 @@ class SignBackend:
         self.save_config()
         self._log(f"已启动 {name}。请自行进入优学院并完成登录后回到本程序。", "success")
         return True
+
+    def _open_debug_tab(self, url: str) -> bool:
+        """调试浏览器已运行时，在同一配置中新增标签页而不是关闭所有窗口。"""
+        try:
+            port = int(self.config.debug_port)
+            response = requests.put(f"http://127.0.0.1:{port}/json/new?{quote(url, safe='')}", timeout=2)
+            if response.ok:
+                self._log("已在调试浏览器中新开页面。", "success")
+                return True
+        except requests.RequestException:
+            pass
+        return False
 
     def _get_ws_url(self) -> str | None:
         try:
@@ -360,9 +618,7 @@ class SignBackend:
         if not self.courses:
             self._log("没有读取到课程，请确认登录账号与网络状态。", "warn")
             return False
-        self._log(f"已读取 {len(self.courses)} 门课程：", "success")
-        for index, course in enumerate(self.courses, 1):
-            self._log(f"  {index:>2}. [{course.id}] {course.name} - {course.teacher_name}", "input")
+        self._log(f"已读取 {len(self.courses)} 门课程，请在下方选择。", "success")
         return True
 
     def select_course(self, query: str) -> Course | None:
@@ -409,10 +665,22 @@ class SignBackend:
         path.parent.mkdir(parents=True, exist_ok=True)
         now = datetime.now()
         with path.open("a", encoding="utf-8") as file:
-            file.write(f"{now:%Y-%m-%d}-{now.hour}:{now:%M} | {course} | {kind} |\n")
+            file.write(f"{now:%Y-%m-%d}-{now.hour}:{now:%M} | {self._redact(course)} | {self._redact(kind)} |\n")
             for item in details:
-                file.write(f"  - {item}\n")
+                file.write(f"  - {self._redact(item)}\n")
             file.write("\n")
+
+    @staticmethod
+    def _redact(value: object) -> str:
+        """避免服务端错误信息把常见凭据原样写进长期日志。"""
+        text = str(value)
+        patterns = (
+            r"(?i)(authorization|token|password|cookie)(\s*[:=]\s*)([^\s,;}&]+)",
+            r"(?i)(bearer\s+)([A-Za-z0-9._~+\-/]+=*)",
+        )
+        for pattern in patterns:
+            text = re.sub(pattern, lambda match: f"{match.group(1)}{match.group(2) if match.lastindex and match.lastindex >= 3 else ''}[已隐藏]", text)
+        return text
 
     def _sign(self, course: Course, classroom_id: int, activity: Activity) -> bool:
         score_type = activity.score_type
@@ -473,26 +741,44 @@ class SignBackend:
         elif new_count == 0:
             self._log(f"[{course.name}] 本轮完成：签到活动已处理，继续等待。", "muted")
 
-    def start_monitor(self) -> None:
-        self.stop_event.clear()
-        self.monitor_state = MonitorState.RUNNING
-        threading.Thread(target=self._monitor, daemon=True).start()
+    def start_monitor(self) -> bool:
+        with self.monitor_lock:
+            if self.monitor_thread is not None and self.monitor_thread.is_alive():
+                self._log("签到监测已在运行，无需重复启动。", "muted")
+                return False
+            self.stop_event.clear()
+            self.monitor_state = MonitorState.RUNNING
+            self.monitor_thread = threading.Thread(
+                target=self._monitor,
+                name="sign-monitor",
+                daemon=True,
+            )
+            self.monitor_thread.start()
+            return True
 
     def stop_monitor(self) -> None:
         self.stop_event.set()
-        self.monitor_state = MonitorState.STOPPED
+        with self.monitor_lock:
+            if self.monitor_thread is not None and self.monitor_thread.is_alive():
+                self.monitor_state = MonitorState.STOPPED
 
     def _monitor(self) -> None:
-        checked: set[str] = set()
-        interval = max(2, int(self.config.poll_interval))
-        self._log(f"开始轮询，每 {interval} 秒检查一次。", "success")
-        round_number = 0
-        while not self.stop_event.is_set():
-            round_number += 1
-            try:
-                course_name = self.selected_course.name if self.selected_course else "未选择课程"
-                self._log(f"[{time.strftime('%H:%M:%S')}] 第 {round_number} 轮：正在检查《{course_name}》…", "info")
-                self._poll_once(checked)
-            except Exception as error:
-                self._log(f"轮询出错：{error}", "warn")
-            self.stop_event.wait(interval)
+        try:
+            checked: set[str] = set()
+            interval = max(2, int(self.config.poll_interval))
+            self._log(f"开始轮询，每 {interval} 秒检查一次。", "success")
+            round_number = 0
+            while not self.stop_event.is_set():
+                round_number += 1
+                try:
+                    course_name = self.selected_course.name if self.selected_course else "未选择课程"
+                    self._log(f"[{time.strftime('%H:%M:%S')}] 第 {round_number} 轮：正在检查《{course_name}》…", "info")
+                    self._poll_once(checked)
+                except Exception as error:
+                    self._log(f"轮询出错：{error}", "warn")
+                self.stop_event.wait(interval)
+        finally:
+            with self.monitor_lock:
+                self.monitor_state = MonitorState.IDLE
+                if self.monitor_thread is threading.current_thread():
+                    self.monitor_thread = None

@@ -2,24 +2,24 @@
 browser_profile/
 config.json
 auth.json
+account.json
 签到记录.md
-sidecar-debug.log
+browser-launcher.log
+browser-service.log
 
 # Python 生成文件
 __pycache__/
 *.py[cod]
 
-# Node / Tauri 生成文件
-tauri-react/node_modules/
-tauri-react/dist/
-tauri-react/src-tauri/target/
-tauri-react/src-tauri/gen/
-tauri-react/.pyinstaller-work/
-tauri-react/.pyinstaller-spec/
-tauri-react/src-tauri/binaries/
+# 前端生成文件
+web/node_modules/
+web/dist/
 
-# 发布文件单独管理，不提交源码仓库
+# 自动更新运行数据
+.update/
+update-result.json
+update_failures.json
 release/
 
-# 旧界面原型仅作本地存档
-archive/
+# 本地逆向分析材料（体积大，不属于应用发布内容）
+/优学院手机端源码/
