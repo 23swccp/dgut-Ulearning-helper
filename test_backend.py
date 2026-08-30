@@ -55,6 +55,8 @@ class BackendTests(unittest.TestCase):
                 "lat": float("nan"),
                 "lng": -1000,
                 "course_playback_rate": 99,
+                "course_quiz_auto_answer": "false",
+                "course_quiz_choice_enabled": "false",
             },
             Path("."),
         )
@@ -64,6 +66,22 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(config.lat, 23.0432)
         self.assertEqual(config.lng, -180)
         self.assertEqual(config.course_playback_rate, 16)
+        self.assertFalse(config.course_quiz_auto_answer)
+        self.assertFalse(config.course_quiz_choice_enabled)
+        self.assertTrue(config.course_quiz_judgment_enabled)
+        self.assertTrue(config.course_quiz_blank_enabled)
+
+    def test_config_disables_quiz_auto_answer_when_every_question_type_is_off(self):
+        config = AppConfig.from_mapping(
+            {
+                "course_quiz_auto_answer": True,
+                "course_quiz_choice_enabled": False,
+                "course_quiz_judgment_enabled": False,
+                "course_quiz_blank_enabled": False,
+            },
+            Path("."),
+        )
+        self.assertFalse(config.course_quiz_auto_answer)
 
     def test_api_client_retries_safe_gets_but_not_posts(self):
         client = ApiClient({"User-Agent": "test"})
@@ -93,6 +111,14 @@ class BackendTests(unittest.TestCase):
             content = log_path.read_text(encoding="utf-8")
             self.assertEqual(content.count("测试课程"), 2)
             self.assertIn("HTTP/status: 200", content)
+
+    def test_relative_log_path_is_resolved_from_application_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            backend = self.make_backend(root)
+            backend.update_settings(log_path="logs/签到记录.md")
+            backend._write_sign_log("测试课程", "一键签到", ["HTTP/status: exception"])
+            self.assertTrue((root / "logs" / "签到记录.md").is_file())
 
     def test_log_redacts_common_credentials(self):
         with tempfile.TemporaryDirectory() as directory:

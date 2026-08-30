@@ -301,6 +301,12 @@
   margin-top: 14px;
 }
 
+.account-fields .field:disabled {
+  background: #f5f6f8;
+  color: #9aa3af;
+  cursor: not-allowed;
+}
+
 .browser-path-field,
 .log-path-row {
   margin-top: 12px;
@@ -318,6 +324,19 @@
 .setting-field + .setting-line,
 .setting-line + .setting-line {
   margin-top: 16px;
+}
+
+.quiz-answer-options {
+  display: grid;
+  gap: 14px;
+  margin: 16px 0 0 10px;
+  padding: 3px 0 3px 16px;
+  border-left: 2px solid #dce8e1;
+}
+
+.quiz-answer-options .setting-line {
+  margin-top: 0;
+  color: #5d6675;
 }
 
 .rate-field {
@@ -381,18 +400,50 @@
   justify-content: flex-end;
 }
 
-.text-button {
+.refresh-button {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: 0;
-  padding: 5px 0 5px 12px;
+  border-radius: 50%;
   background: transparent;
   color: #007f46;
-  font: 600 13px inherit;
   cursor: pointer;
 }
 
-.text-button:disabled {
+.refresh-button:hover:not(:disabled),
+.refresh-button:focus-visible {
+  background: #e9f8ef;
+}
+
+.refresh-button:focus-visible {
+  outline: 2px solid #009b55;
+  outline-offset: 2px;
+}
+
+.refresh-button svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.refresh-button:disabled {
   color: #9aa3af;
   cursor: wait;
+}
+
+.refresh-button.spinning svg {
+  animation: browser-refresh-spin .8s linear infinite;
+}
+
+@keyframes browser-refresh-spin {
+  to { transform: rotate(360deg); }
 }
 
 .browser-list {

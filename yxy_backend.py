@@ -45,6 +45,10 @@ class AppConfig:
     course_document_scroll_enabled: bool = True
     course_document_scroll_interval: float = 3.0
     course_document_scroll_speed: float = 3.0
+    course_quiz_auto_answer: bool = True
+    course_quiz_choice_enabled: bool = True
+    course_quiz_judgment_enabled: bool = True
+    course_quiz_blank_enabled: bool = True
 
     @staticmethod
     def _number(value, default: float, minimum: float, maximum: float, *, integer: bool = False):
@@ -88,7 +92,17 @@ class AppConfig:
             course_document_scroll_enabled=cls._boolean(merged["course_document_scroll_enabled"], defaults.course_document_scroll_enabled),
             course_document_scroll_interval=cls._number(merged["course_document_scroll_interval"], defaults.course_document_scroll_interval, 0.5, 60),
             course_document_scroll_speed=cls._number(merged["course_document_scroll_speed"], defaults.course_document_scroll_speed, 1, 3),
+            course_quiz_auto_answer=cls._boolean(merged["course_quiz_auto_answer"], defaults.course_quiz_auto_answer),
+            course_quiz_choice_enabled=cls._boolean(merged["course_quiz_choice_enabled"], defaults.course_quiz_choice_enabled),
+            course_quiz_judgment_enabled=cls._boolean(merged["course_quiz_judgment_enabled"], defaults.course_quiz_judgment_enabled),
+            course_quiz_blank_enabled=cls._boolean(merged["course_quiz_blank_enabled"], defaults.course_quiz_blank_enabled),
         )
+        if not any((
+            merged["course_quiz_choice_enabled"],
+            merged["course_quiz_judgment_enabled"],
+            merged["course_quiz_blank_enabled"],
+        )):
+            merged["course_quiz_auto_answer"] = False
         for key in ("browser_path", "browser_name", "log_path", "address"):
             merged[key] = str(merged[key] if merged[key] is not None else getattr(defaults, key))
         return cls(**merged)
@@ -298,12 +312,15 @@ class SignBackend:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def open_log_file(self, value: str = "") -> Path:
-        """创建并用系统默认程序打开当前日志文件。"""
+    def _resolve_log_path(self, value: str = "") -> Path:
         path = Path(value.strip() or self.config.log_path).expanduser()
         if not path.is_absolute():
             path = self.root / path
-        path = path.resolve()
+        return path.resolve()
+
+    def open_log_file(self, value: str = "") -> Path:
+        """创建并用系统默认程序打开当前日志文件。"""
+        path = self._resolve_log_path(value)
         if path.exists() and path.is_dir():
             raise OSError(f"日志路径指向文件夹：{path}")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -345,6 +362,10 @@ class SignBackend:
             document_scroll_enabled=bool(self.config.course_document_scroll_enabled),
             document_scroll_interval=float(self.config.course_document_scroll_interval),
             document_scroll_speed=float(self.config.course_document_scroll_speed),
+            quiz_auto_answer=bool(self.config.course_quiz_auto_answer),
+            quiz_choice_enabled=bool(self.config.course_quiz_choice_enabled),
+            quiz_judgment_enabled=bool(self.config.course_quiz_judgment_enabled),
+            quiz_blank_enabled=bool(self.config.course_quiz_blank_enabled),
         )
         return self.course_controller.start(config)
 
@@ -661,7 +682,7 @@ class SignBackend:
     def _write_sign_log(self, course: str, kind: str, details: list[str]) -> None:
         if not self.config.save_log:
             return
-        path = Path(self.config.log_path)
+        path = self._resolve_log_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         now = datetime.now()
         with path.open("a", encoding="utf-8") as file:

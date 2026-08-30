@@ -54,7 +54,6 @@ type DrawerActions = {
   onInstall: () => void;
   onPostpone: () => void;
   onRetryDownload: () => void;
-  onCheck: () => void;
 };
 
 export function UpdateDrawer({ status, open, scroll, actions }: {
@@ -78,6 +77,14 @@ export function UpdateDrawer({ status, open, scroll, actions }: {
   if (!open) return null;
   const downloading = status?.state === "downloading";
   const percent = status ? downloadPercent(status) : 0;
+  const showProgress = Boolean(status);
+  const drawerPercent = status?.state === "idle" ? (!status.error && status.latestVersion ? 100 : 0)
+    : status?.state === "checking" ? 6
+    : status?.state === "available" ? 10
+      : status?.state === "downloading" ? percent
+        : status?.state === "verifying" ? 96
+          : status?.state === "download_failed" || status?.state === "failed_rolled_back" || status?.state === "failed_recovery_required" ? 0
+          : status ? 100 : 0;
   return (
     <aside className="update-drawer" role="dialog" aria-label="更新消息" ref={drawerRef}>
       <div className="update-drawer-body" ref={scroll.ref} onScroll={scroll.onSaveScroll}>
@@ -100,7 +107,6 @@ export function UpdateDrawer({ status, open, scroll, actions }: {
           {downloading && (
             <>
               <span>正在下载 v{status?.latestVersion} {percent}%</span>
-              <span className="update-progress-line big"><i style={{ width: `${percent}%` }} /></span>
               <span>{formatBytes(status?.downloaded || 0)} / {formatBytes(status?.total || 0)}</span>
             </>
           )}
@@ -111,6 +117,11 @@ export function UpdateDrawer({ status, open, scroll, actions }: {
           {status?.state === "checking" && <span>正在检查更新…</span>}
           {status?.state === "available" && <span>发现新版本 v{status.latestVersion}，正在准备下载…</span>}
         </div>
+        {showProgress && (
+          <span className="update-progress-line drawer-progress" aria-label={`更新进度 ${drawerPercent}%`}>
+            <i style={{ width: `${drawerPercent}%` }} />
+          </span>
+        )}
         {status?.state === "ready_to_install" && (
           <p className="update-install-warning">安装时将停止签到监测和刷课，更新完成后程序会自动重新启动。</p>
         )}
@@ -127,9 +138,6 @@ export function UpdateDrawer({ status, open, scroll, actions }: {
               <button type="button" className="secondary" onClick={actions.onPostpone}>暂不更新</button>
               <button type="button" className="primary" onClick={actions.onInstall}>立即更新</button>
             </>
-          )}
-          {(status?.state === "idle" || status?.state === "completed") && (
-            <button type="button" className="secondary" onClick={actions.onCheck}>检查更新</button>
           )}
           {downloading && <button type="button" className="secondary" onClick={actions.onClose}>后台下载中，关闭抽屉</button>}
         </div>

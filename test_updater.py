@@ -430,6 +430,16 @@ class UpdateManagerTests(unittest.TestCase):
 class InstallerLogicTests(unittest.TestCase):
     """不真正运行独立更新器进程，只测试备份/替换/回滚的核心文件操作。"""
 
+    def test_main_disables_native_progress_window(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload_path = Path(directory) / "payload.json"
+            payload_path.write_text("{}", encoding="utf-8")
+            with patch.object(updater_installer, "Progress") as progress_type, \
+                    patch.object(updater_installer, "Installer") as installer_type:
+                installer_type.return_value.run.return_value = 0
+                self.assertEqual(updater_installer.main(["updater_installer.py", "--payload", str(payload_path)]), 0)
+                progress_type.assert_called_once_with(use_window=False)
+
     def make_installer(self, root: Path) -> updater_installer.Installer:
         payload = {
             "installDir": str(root),

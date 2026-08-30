@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>优学院测验模拟环境</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f5f7fa; color: #253044; font-family: "Microsoft YaHei UI", sans-serif; }
+    .simulator-head { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 14px; padding: 14px 24px; background: #172033; color: #fff; box-shadow: 0 4px 16px #11182724; }
+    .simulator-head strong { font-size: 16px; }
+    .simulator-head span { color: #aeb9cc; font-size: 13px; }
+    .simulator-head button { margin-left: auto; border: 1px solid #ffffff38; border-radius: 7px; padding: 7px 12px; background: #ffffff12; color: #fff; cursor: pointer; }
+    .runner-report { width: min(920px, calc(100% - 40px)); margin: 18px auto 0; border: 1px solid #d9e0e8; border-radius: 9px; padding: 12px 16px; background: #fff; color: #526074; font: 13px/1.6 "Cascadia Mono", monospace; white-space: pre-wrap; }
+    .runner-report.pass { border-color: #9bd8b7; background: #effaf4; color: #087443; }
+    .runner-report.fail { border-color: #efb0b0; background: #fff3f3; color: #b42323; }
+    .question-view { width: min(920px, calc(100% - 40px)); margin: 18px auto 60px; border: 1px solid #d9e0e8; border-radius: 10px; background: #fff; overflow: hidden; }
+    .question-setting-panel { padding: 17px 22px; border-bottom: 1px solid #e8ebef; background: #fbfcfd; }
+    .question-setting-list { display: flex; gap: 18px; color: #657185; font-size: 13px; }
+    .question-element-node { padding: 24px 30px; border-bottom: 1px solid #edf0f3; }
+    .question-title-wrapper { margin-bottom: 16px; font-size: 15px; font-weight: 600; }
+    .question-sort { color: #009b55; }
+    .question-type-tag { display: inline-block; margin: 0 8px; border-radius: 5px; padding: 3px 7px; background: #eaf7ef; color: #008149; font-size: 12px; }
+    .choice-list { display: grid; gap: 9px; }
+    .choice-item { display: flex; align-items: center; min-height: 52px; border: 1px solid #dde3e9; border-radius: 8px; padding: 0 16px; color: #354052; text-decoration: none; cursor: pointer; }
+    .choice-item:hover { border-color: #7bcba1; }
+    .checkbox { width: 17px; height: 17px; margin-right: 11px; border: 2px solid #aeb7c4; border-radius: 4px; }
+    .checkbox.radio { border-radius: 50%; }
+    .checkbox.selected { border: 5px solid #009b55; }
+    .option { width: 28px; font-weight: 700; }
+    .checking-type { display: flex; gap: 12px; }
+    .choice-btn { min-width: 120px; border: 1px solid #dce2e8; border-radius: 8px; padding: 13px 20px; text-align: center; cursor: pointer; }
+    .choice-btn.selected { border-color: #009b55; background: #eaf8f0; color: #007d45; }
+    .answer-width { display: inline-flex; width: 180px; height: 42px; vertical-align: middle; }
+    .answer-width input { width: 100%; border: 1px solid #ccd5df; border-radius: 7px; padding: 0 11px; font-size: 15px; outline: none; }
+    .answer-width input:focus { border: 2px solid #009b55; }
+    .question-operation-area { display: flex; justify-content: flex-end; padding: 22px 30px; }
+    .btn-submit { width: 120px; height: 40px; border: 0; border-radius: 7px; background: #009b55; color: #fff; font-weight: 700; cursor: pointer; }
+    .question-analysis-wrapper { display: none; margin-top: 14px; border-radius: 7px; padding: 11px 13px; background: #f4f7f9; color: #657185; font-size: 13px; }
+    .question-wrapper.finished .question-analysis-wrapper { display: block; }
+    .question-wrapper.finished .question-type-tag::after { content: " · 已提交"; }
+  </style>
+</head>
+<body>
+  <header class="simulator-head">
+    <strong>优学院测验模拟环境</strong>
+    <span>复刻调研报告中的主文档 DOM；不会连接或提交到优学院</span>
+    <button type="button" onclick="window.resetQuiz()">重置题目</button>
+  </header>
+  <div id="runnerReport" class="runner-report">等待自动测试运行…</div>
+  <main class="question-view">
+    <div class="question-setting-panel">
+      <div class="question-setting-list">
+        <div class="question-setting-item">练习</div>
+        <div class="question-setting-item">共3题</div>
+        <div class="question-setting-item">限答1次</div>
+      </div>
+    </div>
+    <div class="question-element-node-list">
+      <div class="question-element-node">
+        <div class="question-wrapper" id="question-sim-choice">
+          <div class="split-screen-wrapper">
+            <div class="question-title-wrapper"><span class="question-sort">1</span><span class="question-sort-dot">.</span><span class="question-type-tag">单选题</span><span class="question-title-html question-type-1">模拟选择题：自动作答应选择哪个占位选项？</span></div>
+            <div class="question-body-wrapper"><div class="choice-type"><div class="choice-list clearfix">
+              <a class="choice-item clearfix" id="choice-sim-a" role="button"><div class="checkbox radio"></div><div class="option">A.</div><div class="content-wrapper"><div class="content"><div class="text">选项 A</div></div></div></a>
+              <a class="choice-item clearfix" id="choice-sim-b" role="button"><div class="checkbox radio"></div><div class="option">B.</div><div class="content-wrapper"><div class="content"><div class="text">选项 B</div></div></div></a>
+              <a class="choice-item clearfix" id="choice-sim-c" role="button"><div class="checkbox radio"></div><div class="option">C.</div><div class="content-wrapper"><div class="content"><div class="text">选项 C</div></div></div></a>
+              <a class="choice-item clearfix" id="choice-sim-d" role="button"><div class="checkbox radio"></div><div class="option">D.</div><div class="content-wrapper"><div class="content"><div class="text">选项 D</div></div></div></a>
+            </div></div></div>
+          </div>
+          <div class="question-analysis-wrapper"><div class="answer-result-tip">模拟提交完成</div><div class="correct-answer-area">占位答案：C</div></div>
+        </div>
+      </div>
+      <div class="question-element-node">
+        <div class="question-wrapper" id="question-sim-judgment">
+          <div class="split-screen-wrapper">
+            <div class="question-title-wrapper"><span class="question-sort">2</span><span class="question-sort-dot">.</span><span class="question-type-tag">判断题</span><span class="question-title-html question-type-4">模拟判断题：自动作答应选择“错误”。</span></div>
+            <div class="question-body-wrapper"><div class="checking-type"><div class="choice-btn right-btn" role="button">正确</div><div class="choice-btn wrong-btn" role="button">错误</div></div></div>
+          </div>
+          <div class="question-analysis-wrapper"><div class="answer-result-tip">模拟提交完成</div><div class="correct-answer-area">占位答案：错误</div></div>
+        </div>
+      </div>
+      <div class="question-element-node">
+        <div class="question-wrapper" id="question-sim-blank">
+          <div class="split-screen-wrapper">
+            <div class="question-title-wrapper"><span class="question-sort">3</span><span class="question-sort-dot">.</span><span class="question-type-tag">填空题</span><span class="question-title-html question-type-3 multiple">模拟填空题：程序应在这里输入 <span class="answer-width"><input aria-label="模拟填空" /></span></span></div>
+          </div>
+          <div class="question-analysis-wrapper"><div class="answer-result-tip">模拟提交完成</div><div class="correct-answer-area">占位答案：英文逗号</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="question-operation-area"><button type="button" class="btn-submit">提交</button></div>
+  </main>
+  <script>
+    (() => {
+      const stats = { trustedClicks: 0, submitCount: 0 };
+      const choiceItems = [...document.querySelectorAll('a.choice-item')];
+      const judgmentItems = [...document.querySelectorAll('.checking-type .choice-btn')];
+      const blank = document.querySelector('.answer-width input');
+      const wrappers = [...document.querySelectorAll('.question-wrapper')];
+
+      function track(event) { if (event.isTrusted) stats.trustedClicks += 1; }
+      document.addEventListener('click', track, true);
+      choiceItems.forEach(item => item.addEventListener('click', event => {
+        event.preventDefault();
+        choiceItems.forEach(entry => entry.querySelector('.checkbox').classList.remove('selected'));
+        item.querySelector('.checkbox').classList.add('selected');
+      }));
+      judgmentItems.forEach(item => item.addEventListener('click', event => {
+        judgmentItems.forEach(entry => entry.classList.remove('selected')); item.classList.add('selected');
+      }));
+      document.querySelector('.question-operation-area .btn-submit').addEventListener('click', event => {
+        stats.submitCount += 1;
+        if (document.querySelector('a.choice-item .checkbox.selected')) document.querySelector('#question-sim-choice').classList.add('finished');
+        if (document.querySelector('.checking-type .choice-btn.selected')) document.querySelector('#question-sim-judgment').classList.add('finished');
+        if (blank.value.length > 0) document.querySelector('#question-sim-blank').classList.add('finished');
+      });
+
+      window.resetQuiz = () => {
+        wrappers.forEach(wrapper => wrapper.classList.remove('finished'));
+        choiceItems.forEach(item => item.querySelector('.checkbox').classList.remove('selected'));
+        judgmentItems.forEach(item => item.classList.remove('selected'));
+        blank.value = '';
+        stats.trustedClicks = 0;
+        stats.submitCount = 0;
+        window.scrollTo(0, 0);
+        return true;
+      };
+      window.getSimulatorResult = () => ({
+        choice: (document.querySelector('a.choice-item .checkbox.selected')?.closest('.choice-item')?.querySelector('.option')?.textContent || '').replace('.', '').trim(),
+        judgment: document.querySelector('.checking-type .choice-btn.selected')?.textContent?.trim() || '',
+        blank: blank.value,
+        finished: Object.fromEntries(wrappers.map(wrapper => [wrapper.id, wrapper.classList.contains('finished')])),
+        trustedClicks: stats.trustedClicks,
+        submitCount: stats.submitCount,
+      });
+      window.renderRunnerResult = (title, passed, details) => {
+        const report = document.querySelector('#runnerReport');
+        report.className = `runner-report ${passed ? 'pass' : 'fail'}`;
+        report.textContent = `${passed ? '✓' : '✗'} ${title}\n${details}`;
+      };
+    })();
+  </script>
+</body>
+</html>

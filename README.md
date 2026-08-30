@@ -12,6 +12,10 @@ Windows 下双击 `启动浏览器版.bat`。启动器先确认浏览器，再�
 
 刷课前请在该调试浏览器中打开具体课件学习页（URL 含 `ua.dgut.edu.cn/learnCourse`）。启动后会先回到课程第一张可见页面，再按真实页面状态处理视频、文档和测验；课件标签页可留在后台，脚本不会主动切换到该标签页。
 
+## 本地测验模拟
+
+没有可用课件时，可在项目根目录运行 `python quiz_simulator.py`。模拟器会用隔离的 Chromium 和真实 CDP 输入事件，验证自动答题总开关、三个题型开关以及当前 `config.json` 设置。需要观看过程时运行 `python quiz_simulator.py --show --hold 30`。模拟页面只监听本机，不连接优学院；详细说明见 [`quiz_simulator/README.md`](quiz_simulator/README.md)。
+
 ## 应用内自动更新
 
 程序内置类似 MaaAssistantArknights 的自动更新：

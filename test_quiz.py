@@ -103,6 +103,24 @@ class ModalTests(unittest.TestCase):
 
 
 class AnswerFlowTests(unittest.TestCase):
+    def test_disabled_question_type_is_not_answered(self):
+        state = make_state(
+            [
+                question("q1", "单选题", "选择题", choices=[choice("C", "丙")]),
+                question(
+                    "q2",
+                    "判断题",
+                    "判断题",
+                    judgment=[{"label": "错误", "pos": {"x": 900, "y": 360}}],
+                ),
+            ]
+        )
+        page = FakePage([state])
+        handler = QuizHandler(evaluate=page.evaluate, click=page.click, dry_run=True)
+        summary = handler.answer_all(answer_choice=False, answer_judgment=True)
+        self.assertEqual(summary["done"], 1)
+        self.assertEqual(summary["skipped"], 0)
+
     def test_dry_run_lists_every_question_without_clicking(self):
         state = make_state(
             [

@@ -21,11 +21,14 @@ FRONTEND = ROOT / "web"
 LOG_PATH = ROOT / "browser-launcher.log"
 SERVICE_LOG_PATH = ROOT / "browser-service.log"
 DUPLICATE_NOTICE_SECONDS = 4.0
-CLIENT_HEARTBEAT_TIMEOUT = 10.0
+# 助手页在用户切到优学院课件页后会成为后台标签；Chromium 会明显降低
+# 后台定时器频率。真正关闭标签页有 pagehide/sendBeacon 这条快速路径，
+# 心跳仅作 Beacon 丢失时的兜底，因此保留较长的后台容忍时间。
+CLIENT_HEARTBEAT_TIMEOUT = 120.0
 
 
 def client_connection_expired(client_connected: bool, last_seen: float, now: float | None = None) -> bool:
-    """关闭通知丢失时，根据心跳在短时间内回收本地服务。"""
+    """关闭通知丢失时，根据心跳延迟回收本地服务。"""
     current = time.monotonic() if now is None else now
     return bool(client_connected and current - last_seen >= CLIENT_HEARTBEAT_TIMEOUT)
 

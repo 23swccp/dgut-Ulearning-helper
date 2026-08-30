@@ -19,10 +19,11 @@ from web_server import (
 
 
 class BrowserLauncherTests(unittest.TestCase):
-    def test_missing_heartbeat_stops_service_after_short_grace_period(self):
+    def test_missing_heartbeat_stops_service_after_background_grace_period(self):
         self.assertFalse(browser_launcher.client_connection_expired(False, 0, now=100))
-        self.assertFalse(browser_launcher.client_connection_expired(True, 90.1, now=100))
-        self.assertTrue(browser_launcher.client_connection_expired(True, 90.0, now=100))
+        timeout = browser_launcher.CLIENT_HEARTBEAT_TIMEOUT
+        self.assertFalse(browser_launcher.client_connection_expired(True, 100 - timeout + 0.1, now=100))
+        self.assertTrue(browser_launcher.client_connection_expired(True, 100 - timeout, now=100))
 
     @patch("browser_launcher.time.sleep")
     @patch("builtins.print")

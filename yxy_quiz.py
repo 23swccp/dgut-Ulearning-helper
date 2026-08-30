@@ -371,6 +371,9 @@ class QuizHandler:
         option_label: str = "C",
         judgment_label: str = "错误",
         blank_text: str = ",",
+        answer_choice: bool = True,
+        answer_judgment: bool = True,
+        answer_blank: bool = True,
         max_questions: int = 30,
         advance_on_modal: bool = True,
     ) -> dict:
@@ -406,7 +409,17 @@ class QuizHandler:
                 if not self.handle_modal(state.modal, summary, advance=advance_on_modal):
                     break
                 continue
-            pending = next((q for q in state.questions if not q.finished and q.qid not in attempted), None)
+            def enabled(question: Question) -> bool:
+                if question.type == "判断题":
+                    return answer_judgment
+                if question.type == "填空题":
+                    return answer_blank
+                return answer_choice
+
+            pending = next((
+                q for q in state.questions
+                if not q.finished and q.qid not in attempted and enabled(q)
+            ), None)
             if pending is None:
                 break
             attempted.add(pending.qid)
@@ -419,9 +432,13 @@ class QuizHandler:
                 if outcome == "planned":
                     planned_done = True
                     for q in state.questions:
-                        if not q.finished and q.qid not in attempted:
+                        if q.finished or q.qid in attempted or not enabled(q):
+                            continue
+                        if q.type == "填空题":
+                            self._fill_blanks(state, q, [blank_text] * len(q.blanks))
+                        else:
                             self._select_answer(state, q, option_label, judgment_label)
-                            summary["done"] += 1
+                        summary["done"] += 1
                     break
             elif outcome == "skipped":
                 summary["skipped"] += 1
@@ -458,15 +475,24 @@ class QuizHandler:
 class StandaloneBackend:
     """quiz_probe 同款的最小 CDP 客户端；仅主文档，不附加 iframe。"""
 
-    def __init__(self, port: int = PORT, dry_run: bool = True, log: Callable[..., None] = print) -> None:
+    def __init__(
+        self,
+        port: int = PORT,
+        dry_run: bool = True,
+        log: Callable[..., None] = print,
+        tab_keyword: str = TAB_KEYWORD,
+    ) -> None:
         targets = json.loads(urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5).read())
-        pages = [t for t in targets if t.get("type") == "page" and TAB_KEYWORD in (t.get("url") or "")]
+        pages = [t for t in targets if t.get("type") == "page" and tab_keyword in (t.get("url") or "")]
         if not pages:
             raise RuntimeError("未找到 learnCourse 标签页，请先在浏览器里打开课程页面。")
         self.ws = create_connection(pages[0]["webSocketDebuggerUrl"], timeout=15)
         self._msg_id = 0
         self._dry_run = dry_run
         self._log = log
+
+    def close(self) -> None:
+        self.ws.close()
 
     def evaluate(self, expression: str):
         self._msg_id += 1

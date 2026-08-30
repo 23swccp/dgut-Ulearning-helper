@@ -24,6 +24,7 @@ OUTPUT = ROOT / "release"
 INCLUDE_FILES = (
     "requirements.txt", "README.md", "启动浏览器版.bat", "web/package.json",
 )
+INCLUDE_DIRS = ("quiz_simulator",)
 EXCLUDE_DIRS = {
     ".git", "__pycache__", ".update", "browser_profile", "release", "node_modules",
     "优学院手机端源码", ".pytest_cache", "web/src", "web/node_modules",
@@ -68,6 +69,10 @@ def collect_files() -> list[Path]:
     for path in (ROOT / "web" / "dist").rglob("*") if (ROOT / "web" / "dist").is_dir() else []:
         if path.is_file():
             files.append(path)
+    for directory in INCLUDE_DIRS:
+        for path in (ROOT / directory).rglob("*") if (ROOT / directory).is_dir() else []:
+            if path.is_file() and not is_excluded(path):
+                files.append(path)
     for name in INCLUDE_FILES:
         path = ROOT / name
         if path.is_file():

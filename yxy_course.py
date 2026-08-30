@@ -820,6 +820,9 @@ class CourseConfig:
     document_scroll_speed: float = 3.0
     # 测验自动作答：选择题点 C、判断题点"错误"、每空填英文逗号。
     quiz_auto_answer: bool = True
+    quiz_choice_enabled: bool = True
+    quiz_judgment_enabled: bool = True
+    quiz_blank_enabled: bool = True
     quiz_option_label: str = "C"
     quiz_judgment_label: str = "错误"
     quiz_blank_text: str = ","
@@ -2231,6 +2234,9 @@ class CourseController:
                     option_label=config.quiz_option_label if config else "C",
                     judgment_label=config.quiz_judgment_label if config else "错误",
                     blank_text=config.quiz_blank_text if config else ",",
+                    answer_choice=config.quiz_choice_enabled if config else True,
+                    answer_judgment=config.quiz_judgment_enabled if config else True,
+                    answer_blank=config.quiz_blank_enabled if config else True,
                 )
                 if not self._running:
                     return

@@ -117,7 +117,13 @@
   background: #009b55;
   transition: width 0.35s linear;
 }
-.update-progress-line.big { height: 7px; }
+.update-progress-line.drawer-progress {
+  width: calc(100% - 4px);
+  height: 8px;
+  margin: 1px 2px;
+  border-radius: 4px;
+}
+.update-progress-line.drawer-progress i { border-radius: 4px; }
 
 /* 消息抽屉：固定标题栏 + 滚动正文 + 固定底部状态区 */
 .update-drawer {
@@ -209,6 +215,7 @@
 .update-foot-status .ok { color: #009b55; font-weight: 700; }
 .update-foot-status .bad { color: #a33; }
 .update-install-warning { margin: 0; font-size: 12px; color: #8a6d1f; background: #fdf6e3; border: 1px solid #f0e4bb; border-radius: 8px; padding: 8px 10px; }
+.update-foot-actions:empty { display: none; }
 .update-foot-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .update-foot-actions .secondary { margin-right: 0; }
 

@@ -589,7 +589,8 @@ def main(argv: list[str]) -> int:
         return 2
     payload_path = Path(argv[argv.index("--payload") + 1])
     payload = json.loads(payload_path.read_text(encoding="utf-8"))
-    progress = Progress()
+    # 安装进度只在浏览器消息窗口中呈现，不再额外弹出原生进度窗口。
+    progress = Progress(use_window=False)
     installer = Installer(payload, progress)
     return installer.run()
 
