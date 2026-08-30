@@ -6,6 +6,7 @@ import {
 } from "./courseObservability";
 import { stateLabel, toastFor, type UpdateStatus } from "./updateClient";
 import { UpdateBell, UpdateDrawer, UpdateFailureDialog, UpdateToast, useScrollRestore } from "./UpdateDrawer";
+import { AboutGuide } from "./AboutGuide";
 import "./updateDrawer.css";
 
 type Page = "terminal" | "learning" | "settings" | "about";
@@ -477,7 +478,7 @@ function App() {
         </div>
         <div className="command"><b>›</b><input ref={learningCommandRef} aria-label="刷课命令" autoFocus disabled={busy} value={learningCommand} onChange={event => setLearningCommand(event.target.value)} onKeyDown={event => event.key === "Enter" && runLearning()} placeholder={busy ? "处理中…" : helperRunning ? "刷课运行中；输入 stop 停止，speed 8 调整倍速…" : "按 Enter 启动，或输入 open、speed 8…"}/></div>
       </section>}
-      {page !== "terminal" && page !== "learning" && <div className="settings-body">
+      {page !== "terminal" && page !== "learning" && <div className={`settings-body ${page === "about" ? "about-settings-body" : ""}`}>
       {page === "settings" && <SettingsSection className="utility-settings" title="设置">
         <div className="settings-surface">
         <Card title="启动浏览器"><div className="browser-scan-line"><button type="button" className={`refresh-button ${detectingBrowsers ? "spinning" : ""}`} aria-label={detectingBrowsers ? "正在重新检测浏览器" : "重新检测浏览器"} title={detectingBrowsers ? "检测中…" : "重新检测"} disabled={detectingBrowsers} onClick={detectInstalledBrowsers}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5"/><path d="M18.4 15a7 7 0 1 1 .1-6.1L20 11"/></svg></button></div><div className="browser-list">{detectedBrowsers.map(option => { const selected = browser !== "自定义浏览器" && samePath(path, option.path); return <button type="button" key={option.path} className={`browser-option ${selected ? "selected" : ""}`} onClick={() => chooseDetectedBrowser(option)}><i className="radio-dot"/><strong>{option.name}</strong></button>; })}<button type="button" className={`browser-option ${browser === "自定义浏览器" ? "selected" : ""}`} onClick={chooseCustomBrowser}><i className="radio-dot"/><strong>自定义路径</strong></button></div>{browser === "自定义浏览器" && <label className="custom-browser-path"><span>程序路径</span><input className="field" value={path} onChange={event => setPath(event.target.value)}/></label>}</Card>
@@ -488,7 +489,7 @@ function App() {
         </div>
         <div className="actions settings-save"><button className="primary" disabled={busy} onClick={saveAllSettings}>{busy ? "保存中…" : "保存全部设置"}</button></div>
       </SettingsSection>}
-      {page === "about" && <SettingsSection title="关于" subtitle="优学院助手 · 本机浏览器版。"><Card title="优学院助手" desc="课程读取、签到监测与课件学习辅助的统一本地网页界面。"><dl><dt>版本</dt><dd>{appInfo ? `v${appInfo.version}` : "…"}</dd><dt>运行方式</dt><dd>React + Python · 本机浏览器</dd><dt>GitHub</dt><dd>{appInfo?.repo || "未配置更新仓库"}</dd><dt>数据范围</dt><dd>仅保存在本机</dd></dl></Card></SettingsSection>}
+      {page === "about" && <AboutGuide version={appInfo?.version || ""} repo={appInfo?.repo || ""} />}
       </div>}
       </div>
     </section>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 440" role="img" aria-labelledby="title desc">
+  <title id="title">优学院助手工作流程</title>
+  <desc id="desc">从启动助手和读取登录缓存，分流到签到监测与课件学习两个模块。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f5fbf7"/><stop offset="1" stop-color="#eef3f8"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#13251c" flood-opacity=".09"/></filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L8,3 z" fill="#83a493"/></marker>
+  </defs>
+  <rect width="1200" height="440" rx="30" fill="url(#bg)"/>
+  <g fill="none" stroke="#83a493" stroke-width="4" marker-end="url(#arrow)">
+    <path d="M290 220H400"/><path d="M630 220H710"/><path d="M820 190V110H910"/><path d="M820 250V330H910"/>
+  </g>
+  <g filter="url(#shadow)">
+    <g transform="translate(70 145)"><rect width="220" height="150" rx="22" fill="#fff"/><circle cx="42" cy="42" r="20" fill="#daf3e5"/><path d="M34 42l6 6 12-14" fill="none" stroke="#009b55" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><text x="28" y="91" fill="#1f2937" font-family="Microsoft YaHei, sans-serif" font-size="24" font-weight="700">启动助手</text><text x="28" y="120" fill="#718096" font-family="Microsoft YaHei, sans-serif" font-size="16">检测浏览器 · 启动本地服务</text></g>
+    <g transform="translate(410 145)"><rect width="220" height="150" rx="22" fill="#fff"/><circle cx="42" cy="42" r="20" fill="#e2eef9"/><path d="M32 42h20M42 32v20" stroke="#3979ae" stroke-width="3" stroke-linecap="round"/><text x="28" y="91" fill="#1f2937" font-family="Microsoft YaHei, sans-serif" font-size="24" font-weight="700">读取登录缓存</text><text x="28" y="120" fill="#718096" font-family="Microsoft YaHei, sans-serif" font-size="16">失效时准备登录页面</text></g>
+    <g transform="translate(710 160)"><rect width="220" height="120" rx="22" fill="#16382a"/><text x="110" y="54" text-anchor="middle" fill="#fff" font-family="Microsoft YaHei, sans-serif" font-size="23" font-weight="700">选择模块</text><text x="110" y="84" text-anchor="middle" fill="#b8d3c7" font-family="Microsoft YaHei, sans-serif" font-size="16">签到或课件学习</text></g>
+    <g transform="translate(920 40)"><rect width="220" height="140" rx="22" fill="#fff"/><circle cx="42" cy="40" r="18" fill="#daf3e5"/><text x="42" y="47" text-anchor="middle" fill="#00864a" font-family="sans-serif" font-size="23" font-weight="700">✓</text><text x="28" y="88" fill="#1f2937" font-family="Microsoft YaHei, sans-serif" font-size="23" font-weight="700">签到监测</text><text x="28" y="116" fill="#718096" font-family="Microsoft YaHei, sans-serif" font-size="16">选择课程 · 轮询活动</text></g>
+    <g transform="translate(920 260)"><rect width="220" height="140" rx="22" fill="#fff"/><circle cx="42" cy="40" r="18" fill="#e8e4fa"/><path d="M36 31l15 9-15 9z" fill="#7357b4"/><text x="28" y="88" fill="#1f2937" font-family="Microsoft YaHei, sans-serif" font-size="23" font-weight="700">课件学习</text><text x="28" y="116" fill="#718096" font-family="Microsoft YaHei, sans-serif" font-size="16">视频 · 文档 · 测验</text></g>
+  </g>
+</svg>
