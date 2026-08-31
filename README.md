@@ -37,7 +37,7 @@
 
 ```text
 %LocalAppData%/DgutBot/
-├─ DgutBot.exe       稳定启动入口，快捷方式始终指向这里
+├─ dgut-bot.exe      Velopack 根目录稳定启动桩
 ├─ Update.exe        Velopack 官方更新器
 └─ current/          当前版本（更新时整体替换）
 ```
@@ -144,7 +144,7 @@ python quiz_simulator.py --show --hold 30
 
 程序通过 Velopack 的 GitHub 更新源检查新版本。Velopack 负责版本比较、全局下载锁、断点文件、包校验、增量或完整包选择、安装和重新启动；应用只负责展示进度，并在安装前停止签到/刷课和关闭自己的标签页。
 
-快捷方式指向安装根目录的稳定启动器，而不是某个版本文件夹，因此更新后不会再次启动旧副本。用户数据位于独立的 `%LocalAppData%/DgutBot/data/`，更新替换 `current/` 时不会被覆盖。
+桌面和开始菜单快捷方式由 Velopack 创建并在每次升级时更新；安装根目录的 `dgut-bot.exe` 也是稳定启动桩。不要再从旧便携目录启动程序。用户数据位于独立的 `%LocalAppData%/DgutBot/data/`，更新替换 `current/` 时不会被覆盖。
 
 ## 常见问题
 
