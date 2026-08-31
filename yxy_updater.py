@@ -864,16 +864,18 @@ class UpdateManager:
         self.shutdown_for_update(lambda: None)
 
     def shutdown_for_update(self, stop_backend: Callable[[], None]) -> dict[str, Any]:
-        """移交完成后的主程序退出流程：关标签页 → 停签到/刷课 → 停服务。"""
+        """移交完成后的主程序退出流程：停签到/刷课 → 关标签页 → 停服务。"""
         if not self._state_in("waiting_for_exit"):
             return {"ok": False, "error": "独立更新器尚未就绪，已取消退出"}
+        try:
+            stop_backend()
+        except Exception as error:  # noqa: BLE001
+            self.emit_event("UPDATE_STOP_FAILED", "warning", "update", f"停止后台任务失败：{error}")
+        # 最后才关闭可见页面；返回后服务会立即收到 SHUTDOWN_EVENT，避免
+        # 用户看到浏览器已关闭但后台进程仍在等待任务收尾。
         try:
             closed = close_assistant_tabs(self.debug_port(), self.base_url)
             self.emit_event("UPDATE_TAB_CLOSED", "info", "update", f"已关闭助手标签页（{closed} 个）")
         except Exception as error:  # noqa: BLE001 - 关标签失败不能阻止退出
             self.emit_event("UPDATE_TAB_CLOSE_FAILED", "warning", "update", f"关闭助手标签页失败：{error}")
-        try:
-            stop_backend()
-        except Exception as error:  # noqa: BLE001
-            self.emit_event("UPDATE_STOP_FAILED", "warning", "update", f"停止后台任务失败：{error}")
         return {"ok": True}

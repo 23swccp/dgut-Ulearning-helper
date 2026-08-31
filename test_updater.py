@@ -278,10 +278,12 @@ class UpdateManagerTests(unittest.TestCase):
 
             manager._set_state("waiting_for_exit")
             self.assertTrue(manager.snapshot()["readyForExit"])
-            with patch("yxy_updater.close_assistant_tabs", return_value=0):
-                result = manager.shutdown_for_update(lambda: stopped.append(True))
+            order = []
+            with patch("yxy_updater.close_assistant_tabs", side_effect=lambda *_args: order.append("browser") or 0):
+                result = manager.shutdown_for_update(lambda: (stopped.append(True), order.append("backend")))
             self.assertTrue(result["ok"])
             self.assertEqual(stopped, [True])
+            self.assertEqual(order, ["backend", "browser"])
 
     def test_download_failure_after_retries_records_message(self):
         content = b"fake-zip"

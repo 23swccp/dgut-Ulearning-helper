@@ -149,7 +149,7 @@ class LocalApiHandler(BaseHTTPRequestHandler):
                 SHUTDOWN_EVENT.set()
                 return
             if command == "shutdown_for_update":
-                # 移交流程：精确关闭助手标签页 → 停签到/刷课 → 停服务退出。
+                # 移交流程：停签到/刷课 → 精确关闭助手标签页 → 停服务退出。
                 if not update_manager.snapshot()["readyForExit"]:
                     self._send_json(HTTPStatus.CONFLICT, {"ok": False, "error": "独立更新器尚未就绪，已取消退出"})
                     return
