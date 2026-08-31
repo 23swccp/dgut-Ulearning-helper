@@ -57,10 +57,10 @@ jobs:
           }
 
       - name: Build internal updater (onefile)
-        run: python -m PyInstaller packaging/updater.spec --noconfirm --distpath dist --workpath build --specpath packaging
+        run: python -m PyInstaller packaging/updater.spec --noconfirm --distpath dist --workpath build
 
       - name: Build onedir release
-        run: python -m PyInstaller packaging/dgut-bot.spec --noconfirm --distpath dist --workpath build --specpath packaging
+        run: python -m PyInstaller packaging/dgut-bot.spec --noconfirm --distpath dist --workpath build
 
       - name: Package release ZIP and manifest
         env:
