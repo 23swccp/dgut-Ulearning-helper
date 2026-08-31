@@ -97,7 +97,7 @@
 
 日志设置
 
-可以控制是否保存签到与错误详情，也可以修改签到日志的保存位置。相对路径以程序目录为基准。
+可以控制是否保存签到与错误详情，也可以修改签到日志的保存位置。相对路径以用户数据目录为基准。
 
 本地数据
 
@@ -189,8 +189,8 @@ Set-Location C:\你的路径\dgut-bot
 | `yxy_backend.py` | 登录缓存、课程读取、签到和应用设置 |
 | `yxy_course.py` | 课件状态机、视频控制、文档滚动和章节导航 |
 | `yxy_quiz.py` | 测验页面识别与实验性自动作答 |
-| `yxy_updater.py` | 更新检查、下载、校验和更新移交 |
-| `updater_installer.py` | 独立更新器的安装与失败回滚逻辑 |
+| `velopack_updater.py` | Velopack SDK 与现有前端更新状态之间的薄适配层 |
+| `release-source.json` | Velopack 安装包使用的 GitHub 更新源 |
 | `web/` | React 前端、内置文档和静态图片 |
 | `quiz_simulator/` | 不连接优学院的本地测验模拟页面 |
 | `scripts/` | Windows 打包、发行组装和冒烟测试脚本 |
@@ -261,7 +261,7 @@ python quiz_simulator.py --show --hold 30
 | 签到请求失败 | 界面事件与 `签到记录.md` |
 | 页面结构识别失败 | 浏览器开发者工具、`quiz_probe.py` |
 | 自动答题回归 | `quiz_simulator.py` 与 `test_quiz.py` |
-| 更新失败 | `.update/` 中的状态和更新器日志 |
+| 更新失败 | `browser-service.log`、应用内消息和 GitHub Release 资产 |
 
 平台页面升级后，CSS 选择器和页面结构可能发生变化。修改识别逻辑时，应保留无法识别就跳过的安全行为，不要使用随机点击作为兜底。
 
@@ -279,12 +279,12 @@ powershell -ExecutionPolicy Bypass -File scripts/build_windows_release.ps1
 powershell -ExecutionPolicy Bypass -File scripts/build_windows_release.ps1 -SkipNpmInstall
 ```
 
-脚本会构建前端和 PyInstaller onedir 程序，然后在 `release/` 中生成：
+脚本会构建前端和 PyInstaller onedir 程序，然后由 Velopack 在 `Releases/` 中生成安装器、更新包和版本索引。主要产物包括：
 
 ```text
-dgut-bot-vX.Y.Z-windows-x64/
-dgut-bot-vX.Y.Z-windows-x64.zip
-manifest.json
+DgutBot-Setup.exe
+DgutBot-X.Y.Z-full.nupkg
+releases.win.json
 ```
 
 发布前需要同步修改 `version.py` 和 `web/package.json` 中的版本号。Git 标签应使用相同的 `vX.Y.Z`，否则自动发布流程会停止。
@@ -296,6 +296,6 @@ manifest.json
 3. 页面操作优先使用稳定的 DOM 结构；坐标点击前先滚动并重新读取位置。
 4. 未识别的页面、题型或弹窗应记录并跳过，不进行无依据点击。
 5. 新增配置时同时处理默认值、保存、读取、前端展示和旧版本兼容。
-6. 修改发行内容后运行启动冒烟测试，并确认 ZIP 内包含前端资源与更新器。
+6. 修改发行内容后运行启动冒烟测试，并确认 Velopack 安装器可全新安装、升级和从稳定快捷方式重启。
 
 完整说明可在 [GitHub README]({{REPO_URL}}#开发与测试) 中继续维护。

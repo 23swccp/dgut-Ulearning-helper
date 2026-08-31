@@ -1,6 +1,7 @@
 """浏览器版启动器的本地回归测试。"""
 
 import json
+import os
 import socket
 import sys
 import tempfile
@@ -43,8 +44,14 @@ class FrozenPathTests(unittest.TestCase):
         with patch.object(sys, "frozen", True, create=True):
             self.assertTrue(browser_launcher.static_frontend_available())
 
-    def test_frontend_dist_resolves_under_data_root(self):
-        self.assertEqual(frontend_dist(), data_root() / "web" / "dist")
+    def test_frontend_dist_resolves_under_resource_root(self):
+        self.assertEqual(frontend_dist(), resource_root() / "web" / "dist")
+
+    def test_frozen_data_uses_stable_local_appdata(self):
+        with patch.object(sys, "frozen", True, create=True), \
+                patch.dict(os.environ, {"LOCALAPPDATA": r"C:\Users\tester\AppData\Local"}, clear=False), \
+                patch.dict(os.environ, {"YXY_DATA_DIR": ""}, clear=False):
+            self.assertEqual(data_root(), Path(r"C:\Users\tester\AppData\Local\DgutBot\data"))
 
     def test_dev_resource_root_is_source_directory(self):
         self.assertEqual(resource_root(), Path(browser_launcher.__file__).resolve().parent)

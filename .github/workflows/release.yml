@@ -13,6 +13,7 @@ jobs:
     runs-on: windows-latest
     env:
       PYINSTALLER_VERSION: "6.22.2"
+      VELOPACK_VERSION: "1.2.0"
       PYTHONUTF8: "1"
     steps:
       - name: Checkout
@@ -31,6 +32,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Setup .NET for Velopack
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
 
       - name: Build and test frontend
         working-directory: web
@@ -57,28 +63,24 @@ jobs:
             exit 1
           }
 
-      - name: Build internal updater (onefile)
-        run: python -m PyInstaller packaging/updater.spec --noconfirm --distpath dist --workpath build
-
       - name: Build onedir release
         run: python -m PyInstaller packaging/dgut-bot.spec --noconfirm --distpath dist --workpath build
 
-      - name: Package release ZIP and manifest
-        env:
-          GITHUB_REF_NAME: ${{ github.ref_name }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python scripts/package_release.py
-
       - name: Smoke test packaged app
         shell: pwsh
+        env:
+          YXY_SMOKE_DATA_DIR: ${{ runner.temp }}\dgut-bot-smoke-data
+        run: |
+          python scripts/smoke_test.py "dist/dgut-bot"
+
+      - name: Package and publish with Velopack
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $version = (python -c "from version import APP_VERSION; print(APP_VERSION)").Trim()
-          python scripts/smoke_test.py "release/dgut-bot-v$version-windows-x64"
-
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            release/dgut-bot-v*-windows-x64.zip
-            release/manifest.json
-          generate_release_notes: true
+          dotnet tool install --global vpk --version $env:VELOPACK_VERSION
+          vpk download github --repoUrl "https://github.com/${{ github.repository }}" --token $env:GITHUB_TOKEN
+          if ($LASTEXITCODE -ne 0) { Write-Host "没有可用的历史 Velopack 包，将仅生成完整更新包。" }
+          vpk pack --packId DgutBot --packVersion $version --packDir dist/dgut-bot --mainExe dgut-bot.exe --packTitle "莞工小皮卡" --packAuthors "23swccp" --icon assets/dgut-bot.ico --runtime win-x64 --outputDir Releases
+          vpk upload github --repoUrl "https://github.com/${{ github.repository }}" --token $env:GITHUB_TOKEN --publish --releaseName "v$version" --tag "${{ github.ref_name }}"

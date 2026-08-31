@@ -21,29 +21,28 @@
 | 课件学习 | 视频倍速与播放恢复、文档阅读、章节衔接、走神提示恢复、停滞检测与有限重试 |
 | 自动答题 | 实验性支持选择题、判断题、填空题；总开关和三个题型可分别配置 |
 | 可观测性 | 展示连接状态、课程和页面、任务计划、视频进度、重试、停滞及关键事件 |
-| 自动更新 | 后台检查和下载、SHA-256 校验、安装确认、失败回滚与本地数据保护 |
+| 自动更新 | Velopack 后台检查、断点下载、校验、原子安装、稳定快捷方式与自动重启 |
 
 ## 快速开始
 
 ### 使用发布版（推荐）
 
-1. 从 [Releases](https://github.com/23swccp/dgut-bot/releases/latest) 下载 `dgut-bot-vX.Y.Z-windows-x64.zip`。
-2. 右键 ZIP 选择“全部解压缩”，**完整解压到本地文件夹**。不要在压缩包预览窗口里直接双击 `dgut-bot.exe`。
-3. 双击 `dgut-bot.exe` 启动。
+1. 从 [Releases](https://github.com/23swccp/dgut-bot/releases/latest) 下载 `DgutBot-Setup.exe`。
+2. 运行安装器；Velopack 会安装到当前用户的 LocalAppData，并创建稳定的桌面和开始菜单快捷方式。
+3. 此后始终从快捷方式启动，不要继续运行旧版 ZIP 文件夹中的 `dgut-bot.exe`。
 
 不需要安装 Python，不需要安装 Node.js，也不需要执行 `pip install`。程序会优先使用设置中保存的浏览器，然后依次检测 Edge、Chrome 和其他 Chromium 浏览器。
 
-解压后的目录结构：
+安装后的核心结构：
 
 ```text
-dgut-bot-vX.Y.Z-windows-x64/
-├─ dgut-bot.exe      双击运行
-├─ _internal/        程序运行组件（PyInstaller onedir）
-├─ web/dist/         前端构建产物
-└─ README.md
+%LocalAppData%/DgutBot/
+├─ DgutBot.exe       稳定启动入口，快捷方式始终指向这里
+├─ Update.exe        Velopack 官方更新器
+└─ current/          当前版本（更新时整体替换）
 ```
 
-运行过程中会按需在程序目录生成 `config.json`、`auth.json`、`browser_profile/`、`签到记录.md` 和 `.update/` 等本地数据；配置、登录缓存和日志都写在发行目录，不会写进系统临时目录。账号密码恢复界面目前尚未开放编辑。
+配置、登录缓存、浏览器资料和日志保存在 `%LocalAppData%/DgutBot/data/`，不会放进随更新替换的 `current/`。账号密码恢复界面目前尚未开放编辑。
 
 ### 从源码运行
 
@@ -128,11 +127,11 @@ python quiz_simulator.py --show --hold 30
 | `签到记录.md` | 签到结果与错误详情 | 否 |
 | `browser-launcher.log` | 启动诊断日志 | 否 |
 | `browser-service.log` | 后台服务日志 | 否 |
-| `.update/` | 更新下载、状态和更新器日志 | 否 |
+| `update-ui-state.json` | 应用内更新消息的已读状态；安装包由 Velopack 自行管理 | 否 |
 
 服务只监听 `127.0.0.1`，不会向局域网或公网开放接口。前端不会读取账号密码明文；签到日志会隐藏常见的 Authorization、Token、Password、Cookie 和 Bearer 凭据。
 
-签到日志默认保存在项目目录的 `签到记录.md`，可在设置中关闭或修改路径。相对路径始终以程序目录为基准。记录格式示例：
+签到日志默认保存在用户数据目录的 `签到记录.md`，可在设置中关闭或修改路径。相对路径始终以用户数据目录为基准。记录格式示例：
 
 ```text
 2026-08-30-10:16 | 课程名称 | 一键签到 |
@@ -143,18 +142,9 @@ python quiz_simulator.py --show --hold 30
 
 ## 应用内更新
 
-程序启动后会检查 GitHub Release。发现新版本时在后台下载完整 ZIP（`dgut-bot-vX.Y.Z-windows-x64.zip`），支持断点续传和最多三次自动重试；下载完成后校验 SHA-256，并等待用户确认安装。
+程序通过 Velopack 的 GitHub 更新源检查新版本。Velopack 负责版本比较、全局下载锁、断点文件、包校验、增量或完整包选择、安装和重新启动；应用只负责展示进度，并在安装前停止签到/刷课和关闭自己的标签页。
 
-安装期间会关闭小皮卡自己的标签页、停止签到与刷课服务，然后由独立更新器（发行包内 `_internal/updater/updater.exe`）在独立进程中替换程序文件，全程不依赖系统 Python。失败时自动回滚，旧版本仍可启动。以下本地数据在更新中不会被覆盖：
-
-```text
-config.json
-auth.json
-account.json
-browser_profile/
-签到记录.md
-运行日志与更新状态
-```
+快捷方式指向安装根目录的稳定启动器，而不是某个版本文件夹，因此更新后不会再次启动旧副本。用户数据位于独立的 `%LocalAppData%/DgutBot/data/`，更新替换 `current/` 时不会被覆盖。
 
 ## 常见问题
 
@@ -187,9 +177,9 @@ dgut-bot.exe（PyInstaller onedir，windowed）
    │  ├─ yxy_backend.py       登录、课程与签到
    │  ├─ yxy_course.py        课件状态机与 CDP 控制
    │  ├─ yxy_quiz.py          测验识别与作答
-   │  └─ yxy_updater.py       更新检查与移交
+   │  └─ velopack_updater.py  Velopack SDK 的前端状态适配
    ├─ React + Vite 前端（web/dist，由本地服务托管）
-   ├─ _internal/updater/updater.exe  独立更新器
+   ├─ Velopack Update.exe / 稳定启动器
    └─ 独立 Chromium browser_profile/
 ```
 
@@ -226,7 +216,7 @@ npm run build
 
 1. 同步修改 `version.py` 和 `web/package.json` 中的版本号。
 2. 提交并推送 `v*` tag；tag 必须与 `version.py` 中的 `APP_VERSION` 一致，否则发布停止。
-3. GitHub Actions 在 windows-latest 上构建前端、运行 Python 与前端测试、用 PyInstaller（固定版本）打包 onedir 发行版、对打包结果执行启动冒烟测试，最后把 `dgut-bot-vX.Y.Z-windows-x64.zip` 与 `manifest.json` 上传到 Release。
+3. GitHub Actions 构建并测试前端与 Python，用 PyInstaller 生成 onedir，再由 Velopack `vpk` 生成并发布 `Setup.exe`、完整/增量更新包和 `releases.win.json`。
 
 本地构建发行版：
 
@@ -234,7 +224,7 @@ npm run build
 powershell -ExecutionPolicy Bypass -File scripts/build_windows_release.ps1
 ```
 
-脚本会清理本项目 `build/`、`dist/` 临时目录，构建前端与 PyInstaller 包，使用 `assets/dgut-bot.ico` 写入程序图标，组装发行目录并生成 ZIP、`manifest.json` 和 SHA-256。
+脚本会清理本项目 `build/`、`dist/`、`Releases/`，完成测试和 PyInstaller 构建，再调用 Velopack 生成安装器与更新资产。本地需要安装 .NET 8 SDK；只验证 PyInstaller 包时可加 `-SkipVelopack`。
 
 ## 项目文档
 

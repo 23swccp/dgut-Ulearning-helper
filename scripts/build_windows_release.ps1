@@ -1,66 +1,53 @@
-# 构建莞工小皮卡 Windows x64 免安装发行版（PyInstaller onedir）。
-# 用法：powershell -ExecutionPolicy Bypass -File scripts/build_windows_release.ps1
-#       可选 -SkipNpmInstall 跳过 npm ci（前端依赖未变化时加速本地重跑）。
-# 产物：release/dgut-bot-vX.Y.Z-windows-x64.zip 与 release/manifest.json
+# 使用 PyInstaller onedir + Velopack 构建 Windows 安装器与更新包。
+# 前置要求：Python、Node.js、.NET 8 SDK。
 param(
-    [switch]$SkipNpmInstall
+    [switch]$SkipNpmInstall,
+    [switch]$SkipVelopack
 )
 
 $ErrorActionPreference = "Stop"
-$Root = Split-Path -Parent $PSScriptRoot
-Set-Location $Root
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
+Set-Location $ProjectRoot
 
-Write-Host "== 1/7 Clean build/ and dist/ =="
-foreach ($name in @("build", "dist")) {
-    $path = Join-Path $Root $name
-    if (Test-Path $path) {
-        Remove-Item $path -Recurse -Force
-        Write-Host "Removed $name/"
+foreach ($name in @("build", "dist", "Releases")) {
+    $target = Join-Path $ProjectRoot $name
+    if (Test-Path -LiteralPath $target) {
+        $resolved = (Resolve-Path -LiteralPath $target).Path
+        if (-not $resolved.StartsWith($ProjectRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "拒绝清理工作区外路径：$resolved"
+        }
+        Remove-Item -LiteralPath $resolved -Recurse -Force
     }
 }
 
-Write-Host "== 2/7 Build frontend =="
-Push-Location (Join-Path $Root "web")
+Push-Location (Join-Path $ProjectRoot "web")
 try {
-    if (-not $SkipNpmInstall) {
-        npm ci
-        if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
-    }
-    npm run build
-    if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
-} finally {
-    Pop-Location
+    if (-not $SkipNpmInstall) { npm ci; if ($LASTEXITCODE -ne 0) { throw "npm ci failed" } }
+    npm test -- --run; if ($LASTEXITCODE -ne 0) { throw "frontend tests failed" }
+    npm run build; if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
+} finally { Pop-Location }
+
+python -m pip install -r requirements.txt "pyinstaller==6.22.2"
+if ($LASTEXITCODE -ne 0) { throw "dependency installation failed" }
+python -m pytest -q test_backend.py test_course.py test_launcher.py test_quiz.py test_updater.py
+if ($LASTEXITCODE -ne 0) { throw "python tests failed" }
+python -m PyInstaller packaging/dgut-bot.spec --noconfirm --distpath dist --workpath build
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
+
+$smokeData = Join-Path $env:TEMP "dgut-bot-smoke-data"
+$env:YXY_SMOKE_DATA_DIR = $smokeData
+python scripts/smoke_test.py "dist/dgut-bot"
+if ($LASTEXITCODE -ne 0) { throw "packaged smoke test failed" }
+
+if ($SkipVelopack) {
+    Write-Host "PyInstaller output: dist/dgut-bot (Velopack packaging skipped)"
+    exit 0
 }
-
-Write-Host "== 3/7 Check PyInstaller =="
-python scripts/pyinstaller_run.py --version 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "PyInstaller not found; installing pyinstaller==6.22.2 ..."
-    python -m pip install "pyinstaller==6.22.2"
-    if ($LASTEXITCODE -ne 0) { throw "PyInstaller installation failed" }
-}
-
-Write-Host "== 4/7 Build internal updater (onedir) =="
-python scripts/pyinstaller_run.py packaging/updater.spec --noconfirm --distpath dist --workpath build
-if ($LASTEXITCODE -ne 0) { throw "updater.spec build failed" }
-
-Write-Host "== 5/7 Build main application (onedir, windowed) =="
-python scripts/pyinstaller_run.py packaging/dgut-bot.spec --noconfirm --distpath dist --workpath build
-if ($LASTEXITCODE -ne 0) { throw "dgut-bot.spec build failed" }
-
-if (-not (Test-Path (Join-Path $Root "assets/dgut-bot.ico"))) {
-    Write-Host "Notice: assets/dgut-bot.ico is missing; building without an icon."
-}
-
-Write-Host "== 6/7 Assemble release, ZIP, and manifest.json =="
-python scripts/package_release.py
-if ($LASTEXITCODE -ne 0) { throw "package_release.py failed" }
-
-Write-Host "== 7/7 Release artifacts =="
-$release = Join-Path $Root "release"
-Get-ChildItem $release -File | ForEach-Object {
-    Write-Host ("{0}  ({1:N1} MB)" -f $_.FullName, ($_.Length / 1MB))
-}
-$manifest = Get-Content (Join-Path $release "manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
-Write-Host ("ZIP SHA-256: {0}" -f $manifest.sha256)
-Write-Host ("Release URL: {0}" -f $manifest.url)
+dotnet --version | Out-Null
+if ($LASTEXITCODE -ne 0) { throw ".NET 8 SDK is required for Velopack" }
+dotnet tool update --global vpk --version 1.2.0
+if ($LASTEXITCODE -ne 0) { dotnet tool install --global vpk --version 1.2.0 }
+$version = (python -c "from version import APP_VERSION; print(APP_VERSION)").Trim()
+vpk pack --packId DgutBot --packVersion $version --packDir dist/dgut-bot --mainExe dgut-bot.exe --packTitle "莞工小皮卡" --packAuthors "23swccp" --icon assets/dgut-bot.ico --runtime win-x64 --outputDir Releases
+if ($LASTEXITCODE -ne 0) { throw "Velopack packaging failed" }
+Get-ChildItem -LiteralPath (Join-Path $ProjectRoot "Releases") -File | Select-Object Name, Length

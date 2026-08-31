@@ -10,12 +10,13 @@ from uuid import uuid4
 
 from app_paths import data_root
 from yxy_backend import SignBackend
-from yxy_updater import UpdateManager
-from version import APP_NAME, APP_VERSION, GITHUB_REPO, RELEASE_API
+from velopack_updater import UpdateManager
+from version import APP_NAME, APP_VERSION, GITHUB_REPO
 
 
-# 配置、登录缓存、浏览器资料、日志与更新状态都属于用户数据，统一写入程序目录。
+# 配置、登录缓存、浏览器资料、日志与更新状态统一写入 LocalAppData。
 ROOT = data_root()
+ROOT.mkdir(parents=True, exist_ok=True)
 class EventBuffer:
     """线程安全的有限事件流；读取使用游标，不会消费事件。"""
 
@@ -81,11 +82,11 @@ def emit_event(code: str, level: str, category: str, message: str, **kwargs: Any
 
 backend = SignBackend(emit=emit, emit_event=emit_event, root=ROOT)
 
-# 应用内自动更新：状态持久化在 .update/state.json，前端通过 get_update_status 轮询。
+# 应用内自动更新由 Velopack 执行；这里只适配现有前端状态接口。
 update_manager = UpdateManager(
     ROOT,
     version=APP_VERSION,
-    release_api=RELEASE_API,
+    repository=GITHUB_REPO,
     emit_event=emit_event,
     debug_port=lambda: backend.config.debug_port,
 )

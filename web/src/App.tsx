@@ -313,7 +313,7 @@ function App() {
   }
   async function ackFailure(action: "later" | "redownload" | "log") {
     await call("ack_update_failure");
-    if (action === "log") { await call("open_log", { path: ".update/updater.log" }); return; }
+    if (action === "log") { await call("open_log", { path: "browser-service.log" }); return; }
     if (action === "redownload") { setDrawerOpen(true); await retryDownload(); }
   }
   async function chooseSignCourse(course: Course) {

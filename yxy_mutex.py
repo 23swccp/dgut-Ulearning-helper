@@ -1,4 +1,4 @@
-"""Windows 命名互斥锁封装：App 锁防多开，Updating 锁表示更新器正在修改程序。
+"""Windows 命名互斥锁封装：App 锁用于防止后台服务多开。
 
 仅依赖 ctypes；非 Windows 平台退化为进程内字典，保证测试可以在任意环境运行。
 """
@@ -10,7 +10,6 @@ import sys
 from typing import Any
 
 APP_MUTEX = r"Local\YxyAssistant.App"
-UPDATING_MUTEX = r"Local\YxyAssistant.Updating"
 
 ERROR_ALREADY_EXISTS = 183
 SYNCHRONIZE = 0x00100000
@@ -143,7 +142,3 @@ class NamedMutex:
 
 def app_mutex_exists() -> bool:
     return backend().exists(APP_MUTEX)
-
-
-def updating_mutex_exists() -> bool:
-    return backend().exists(UPDATING_MUTEX)

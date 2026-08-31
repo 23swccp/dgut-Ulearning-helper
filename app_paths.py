@@ -1,17 +1,13 @@
-"""统一的资源与数据路径管理。
+"""统一的只读资源与持久用户数据路径。
 
-冻结（PyInstaller onedir）模式下必须区分两类目录：
-
-- 只读内置资源：随发行包分发，位于 PyInstaller 解包目录（sys._MEIPASS）。
-- 用户数据：config.json、auth.json、browser_profile、日志与更新状态等，
-  统一写在 dgut-bot.exe 所在目录，绝不写进解包临时目录。
-
-开发模式下两者都是源码目录，行为与历史版本一致。
-本模块只依赖标准库，更新器与测试可以安全引用。
+Velopack 更新会整体替换安装目录中的 ``current``，因此配置、登录缓存、
+浏览器资料和日志必须放在稳定的 LocalAppData 数据目录。开发模式仍默认
+使用源码目录；测试和便携迁移工具可用 ``YXY_DATA_DIR`` 显式覆盖。
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -29,12 +25,17 @@ def resource_root() -> Path:
 
 
 def data_root() -> Path:
-    """用户数据目录：冻结后为 dgut-bot.exe 所在目录，开发时为源码目录。"""
+    """返回不会随 Velopack 更新被替换的用户数据目录。"""
+    override = os.environ.get("YXY_DATA_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
     if is_frozen():
-        return Path(sys.executable).resolve().parent
+        local = os.environ.get("LOCALAPPDATA", "").strip()
+        base = Path(local) if local else Path.home() / "AppData" / "Local"
+        return (base / "DgutBot" / "data").resolve()
     return Path(__file__).resolve().parent
 
 
 def frontend_dist() -> Path:
-    """前端构建产物目录；发布包位于程序目录顶层 web/dist。"""
-    return data_root() / "web" / "dist"
+    """前端是随版本替换的只读资源，始终从 PyInstaller 资源目录读取。"""
+    return resource_root() / "web" / "dist"

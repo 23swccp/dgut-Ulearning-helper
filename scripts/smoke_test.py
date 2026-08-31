@@ -1,8 +1,8 @@
 """发行包启动冒烟测试：只验证本地服务、静态资源与生命周期。
 
 - 不访问真实课程、不提交签到、不执行真实刷课。
-- 用法：python scripts/smoke_test.py [发行目录]
-  不传参数时自动选择 release/ 下唯一的 dgut-bot-v*-windows-x64 目录。
+- 用法：python scripts/smoke_test.py [PyInstaller onedir 目录]
+  不传参数时默认验证 dist/dgut-bot。
 
 验证项：
 1. 从发行目录直接启动 dgut-bot.exe（无源码参与）。
@@ -10,13 +10,14 @@
 3. 首页 HTML 可加载；web/dist 的 JS/CSS 正常返回。
 4. 前后端 API 可通信（get_app_info/get_settings）。
 5. 能检测到 Edge 或 Chrome。
-6. 配置写入发行目录而不是 PyInstaller 临时目录。
+6. 配置写入独立用户数据目录，不进入 Velopack current。
 7. 关闭后端口释放；再次启动不会因“已有实例”卡死。
 """
 
 from __future__ import annotations
 
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -146,19 +147,18 @@ def expected_version() -> str:
 
 
 def main(argv: list[str]) -> int:
+    smoke_data = Path(os.environ.get("YXY_SMOKE_DATA_DIR", ROOT / ".smoke-data")).resolve()
+    os.environ["YXY_DATA_DIR"] = str(smoke_data)
     if len(argv) > 1:
         release_dir = Path(argv[1]).resolve()
     else:
-        candidates = sorted((ROOT / "release").glob("dgut-bot-v*-windows-x64"))
-        if len(candidates) != 1:
-            raise SystemExit(f"无法定位唯一的发行目录（找到 {len(candidates)} 个）；请传入路径")
-        release_dir = candidates[0].resolve()
+        release_dir = (ROOT / "dist" / "dgut-bot").resolve()
     print(f"发行目录：{release_dir}")
 
     exe = release_dir / "dgut-bot.exe"
     check(exe.is_file(), "dgut-bot.exe 存在")
     check((release_dir / "_internal").is_dir(), "_internal 资源目录存在")
-    index = release_dir / "web" / "dist" / "index.html"
+    index = release_dir / "_internal" / "web" / "dist" / "index.html"
     check(index.is_file(), "web/dist/index.html 存在")
 
     try:
@@ -171,7 +171,7 @@ def main(argv: list[str]) -> int:
         status, body, _headers = http_get("/")
         check(status == 200 and b'id="root"' in body, "首页 HTML 可加载")
 
-        assets = sorted((release_dir / "web" / "dist" / "assets").iterdir())
+        assets = sorted((release_dir / "_internal" / "web" / "dist" / "assets").iterdir())
         js = next((a for a in assets if a.suffix == ".js"), None)
         css = next((a for a in assets if a.suffix == ".css"), None)
         check(js is not None and css is not None, "web/dist 存在 JS 与 CSS 资源")
@@ -189,8 +189,9 @@ def main(argv: list[str]) -> int:
         detected = post_command("detect_browsers").get("browsers", [])
         check(bool(detected), f"检测到 Chromium 浏览器：{[item['name'] for item in detected]}")
 
-        check((release_dir / "config.json").is_file(), "config.json 写入发行目录（而非临时目录）")
-        check((release_dir / "browser-launcher.log").is_file(), "启动日志写入发行目录")
+        check((smoke_data / "config.json").is_file(), "config.json 写入独立用户数据目录")
+        check((smoke_data / "browser-launcher.log").is_file(), "启动日志写入独立用户数据目录")
+        check(not (release_dir / "config.json").exists(), "Velopack current 目录没有用户配置")
 
         print("关闭服务…")
         close_debug_browser(settings.get("config", {}), debug_port_was_free)

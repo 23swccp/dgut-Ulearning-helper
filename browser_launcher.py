@@ -7,6 +7,13 @@
 
 from __future__ import annotations
 
+# Velopack 官方要求：必须在主入口、其它应用初始化之前执行一次。
+# 更新钩子可能在这里直接结束进程，不能把它放到后面的 main() 中。
+if __name__ == "__main__":
+    import velopack as _velopack
+
+    _velopack.App().set_auto_apply_on_startup(False).run()
+
 import os
 import shutil
 import socket
@@ -21,8 +28,16 @@ from urllib.request import Request, urlopen
 
 from app_paths import data_root, frontend_dist, is_frozen
 from backend_commands import backend, emit_event
-from web_server import CLIENT_CLOSED_EVENT, LocalApiHandler, SHUTDOWN_EVENT, client_last_seen, reset_client_state, update_manager
-from yxy_mutex import APP_MUTEX, NamedMutex, app_mutex_exists, updating_mutex_exists
+from web_server import (
+    CLIENT_CLOSED_EVENT,
+    LocalApiHandler,
+    SHUTDOWN_EVENT,
+    client_last_seen,
+    reset_client_state,
+    stop_backend_tasks,
+    update_manager,
+)
+from yxy_mutex import APP_MUTEX, NamedMutex, app_mutex_exists
 
 ROOT = data_root()
 FRONTEND = ROOT / "web"
@@ -232,15 +247,6 @@ def show_notice_window(message: str, title: str = APP_TITLE, auto_close_ms: int 
         pass
 
 
-def show_update_in_progress_window() -> None:
-    """更新互斥锁存在时弹出的小窗口。"""
-    show_notice_window(
-        "优学院助手正在更新\n\n更新完成后程序将自动重新启动，请勿重复打开。",
-        title="优学院助手正在更新",
-        auto_close_ms=10000,
-    )
-
-
 def show_already_running_notice() -> None:
     """重复启动时提示片刻，避免窗口一闪而过；冻结模式改用图形提示。"""
     if is_frozen():
@@ -295,6 +301,7 @@ def run_background_service(web_port: int, use_static: bool = False, api_port: in
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         update_manager.set_ports(f"http://127.0.0.1:{web_port}", web_port)
+        update_manager.set_exit_callback(SHUTDOWN_EVENT.set, stop_backend_tasks)
         update_manager.start_auto_check()
         client_connected = False
         close_requested_at: float | None = None
@@ -382,10 +389,7 @@ def redirect_frozen_output() -> None:
 
 
 def main_frozen() -> int:
-    """免安装发行版入口：无控制台，浏览器缺失时通过网页设置处理。"""
-    if updating_mutex_exists():
-        show_update_in_progress_window()
-        return 0
+    """Velopack 安装版入口：无控制台，浏览器缺失时通过网页设置处理。"""
     if app_mutex_exists():
         show_already_running_notice()
         return 0
@@ -413,7 +417,7 @@ def main_frozen() -> int:
         return 0
     except Exception as error:  # noqa: BLE001 - 无控制台：所有启动错误必须落盘
         log_line(LOG_PATH, f"启动失败：{error!r}")
-        show_notice_window(f"{APP_TITLE}启动失败：{error}\n详情见程序目录中的 browser-launcher.log。")
+        show_notice_window(f"{APP_TITLE}启动失败：{error}\n详情见本机应用数据目录中的 browser-launcher.log。")
         return 1
 
 
@@ -425,10 +429,6 @@ def main() -> int:
         return run_background_service(web_port, "--static" in sys.argv, api_port)
     if is_frozen():
         return main_frozen()
-    # 更新互斥锁优先：更新器接管期间拒绝一切重复启动请求。
-    if updating_mutex_exists():
-        show_update_in_progress_window()
-        return 0
     if app_mutex_exists():
         show_already_running_notice()
         return 0

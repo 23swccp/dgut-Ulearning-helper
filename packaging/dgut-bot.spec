@@ -1,37 +1,27 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""莞工小皮卡主程序：Windows x64 onedir 免安装发行版。
+"""莞工小皮卡主程序：交给 Velopack 打包的 Windows x64 onedir 目录。
 
-构建（先执行 packaging/updater.spec 生成内部更新器）：
+构建：
   python -m PyInstaller packaging/dgut-bot.spec --noconfirm
 产物：dist/dgut-bot/dgut-bot.exe + dist/dgut-bot/_internal/
 
-- onedir 模式：更新时被占用的 EXE/DLL 等待进程退出后整体替换。
-- windowed 模式：无控制台；启动错误写入程序目录 browser-launcher.log。
-- web/dist 不打进 _internal：由 scripts/package_release.py 复制到发行目录
-  顶层 web/dist，冻结代码通过 app_paths.frontend_dist() 定位。
-- 内部更新器为 onedir（onefile 的引导父子进程会随主程序退出而终止，
-  破坏移交流程），位于 _internal/updater/。
+- onedir 模式：符合 Velopack 官方对 Python/PyInstaller 应用的要求。
+- windowed 模式：无控制台；启动错误写入 LocalAppData 数据目录的 browser-launcher.log。
+- web/dist 和 release-source.json 作为只读资源打进 _internal；用户数据
+  统一存放在 LocalAppData，不进入 Velopack 的 current 目录。
 - 正式图标放在 assets/dgut-bot.ico；缺失时以无图标构建，并打印明确提示。
 """
 
 from pathlib import Path
 
 ROOT = Path(SPECPATH).resolve().parent
-UPDATER_DIR = ROOT / "dist" / "updater"
 ICON = ROOT / "assets" / "dgut-bot.ico"
 
 datas = [
-    # 校验新版本时需要读取版本号（updater_installer.verify_new_version）。
-    (str(ROOT / "version.py"), "."),
+    (str(ROOT / "web" / "dist"), "web/dist"),
+    (str(ROOT / "release-source.json"), "."),
+    (str(ROOT / "README.md"), "."),
 ]
-if (UPDATER_DIR / "updater.exe").is_file():
-    datas.append((str(UPDATER_DIR), "updater"))
-else:
-    print(
-        "警告：未找到 dist/updater/updater.exe。"
-        "请先执行 python -m PyInstaller packaging/updater.spec --noconfirm，"
-        "否则本构建不具备自动更新安装能力。"
-    )
 
 if ICON.is_file():
     icon_option: str | None = str(ICON)
