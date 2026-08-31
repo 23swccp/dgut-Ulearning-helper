@@ -27,7 +27,7 @@
 
 ### 使用发布版（推荐）
 
-1. 从 [Releases](https://github.com/23swccp/dgut-bot/releases/latest) 下载 `DgutBot-Setup.exe`。
+1. 从 [Releases](https://github.com/23swccp/dgut-bot/releases/latest) 下载 `DgutBot-win-Setup-Qing-Zhi-Xia-Zai-Zhe-Ge.exe`。
 2. 运行安装器；Velopack 会安装到当前用户的 LocalAppData，并创建稳定的桌面和开始菜单快捷方式。
 3. 此后始终从快捷方式启动，不要继续运行旧版 ZIP 文件夹中的 `dgut-bot.exe`。
 

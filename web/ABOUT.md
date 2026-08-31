@@ -282,7 +282,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build_windows_release.ps1 -Skip
 脚本会构建前端和 PyInstaller onedir 程序，然后由 Velopack 在 `Releases/` 中生成安装器、更新包和版本索引。主要产物包括：
 
 ```text
-DgutBot-Setup.exe
+DgutBot-win-Setup-Qing-Zhi-Xia-Zai-Zhe-Ge.exe
 DgutBot-X.Y.Z-full.nupkg
 releases.win.json
 ```
