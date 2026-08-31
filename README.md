@@ -216,7 +216,7 @@ npm run build
 
 1. 同步修改 `version.py` 和 `web/package.json` 中的版本号。
 2. 提交并推送 `v*` tag；tag 必须与 `version.py` 中的 `APP_VERSION` 一致，否则发布停止。
-3. GitHub Actions 构建并测试前端与 Python，用 PyInstaller 生成 onedir，再由 Velopack `vpk` 生成并发布 `Setup.exe`、完整/增量更新包和 `releases.win.json`。
+3. GitHub Actions 构建并测试前端与 Python，用 PyInstaller 生成 onedir，再由 Velopack `vpk` 生成并发布 `Setup.exe`、完整/增量更新包和更新索引；不生成容易让普通用户误选的 Portable.zip。
 
 本地构建发行版：
 
