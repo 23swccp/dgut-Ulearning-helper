@@ -3,6 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/23swccp/dgut-bot?display_name=tag&sort=semver)](https://github.com/23swccp/dgut-bot/releases/latest)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D4)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
+[![License](https://img.shields.io/badge/license-MIT-2f2f2f)](LICENSE)
 
 **莞工小皮卡**是一款面向东莞理工学院优学院的本地浏览器助手，提供课程签到监测、课件学习辅助、实验性测验自动作答和应用内更新。
 
@@ -252,6 +253,6 @@ powershell -ExecutionPolicy Bypass -File scripts/build_windows_release.ps1
 
 ## 许可证与免责声明
 
-仓库当前未包含开源许可证文件；除非版权所有者另行授权，否则默认版权规则适用。
+本项目采用 [MIT License](LICENSE) 开源。你可以使用、复制、修改、合并、发布和分发本软件，但必须在副本或重要部分中保留原版权声明和许可证声明。
 
 本项目按现状提供，不保证与平台未来版本持续兼容，也不保证签到、学习记录或测验结果一定成功。因使用本项目造成的课程记录、成绩、账号或其他后果由使用者自行承担。
