@@ -196,13 +196,13 @@ function App() {
   }, [page, updateStatus?.latestVersion, updateStatus?.state]);
   // 移交确认后由后端先接收关机请求，再通过 CDP 精确关闭助手标签页。
   useEffect(() => {
-    if (!updateStatus?.handoff || handoffSentRef.current) return;
+    if (!updateStatus?.readyForExit || handoffSentRef.current) return;
     handoffSentRef.current = true;
     append("正在移交给更新器……");
     window.setTimeout(() => {
       void call("shutdown_for_update");
     }, 700);
-  }, [updateStatus?.handoff]);
+  }, [updateStatus?.readyForExit]);
   useEffect(() => {
     if (!drawerOpen) return;
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setDrawerOpen(false); };

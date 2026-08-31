@@ -471,6 +471,9 @@ class UpdateManager:
             "unreadCount": unread,
             "downloading": downloading,
             "handoff": state["state"] in HANDOFF_STATES,
+            # handoff 仅表示移交流程已开始；独立更新器写入 ready 文件后
+            # 才能安全退出主程序，否则守护安装线程会随主进程一起终止。
+            "readyForExit": state["state"] == "waiting_for_exit",
             "canInstall": state["state"] == "ready_to_install",
             "canRetryDownload": state["state"] in ("available", "download_failed"),
             "pendingFailureDialog": self.pending_failure_dialog(),
@@ -862,6 +865,8 @@ class UpdateManager:
 
     def shutdown_for_update(self, stop_backend: Callable[[], None]) -> dict[str, Any]:
         """移交完成后的主程序退出流程：关标签页 → 停签到/刷课 → 停服务。"""
+        if not self._state_in("waiting_for_exit"):
+            return {"ok": False, "error": "独立更新器尚未就绪，已取消退出"}
         try:
             closed = close_assistant_tabs(self.debug_port(), self.base_url)
             self.emit_event("UPDATE_TAB_CLOSED", "info", "update", f"已关闭助手标签页（{closed} 个）")

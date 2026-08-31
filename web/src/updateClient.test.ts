@@ -16,6 +16,7 @@ const status = (patch: Partial<UpdateStatus>): UpdateStatus => ({
   unreadCount: 0,
   downloading: false,
   handoff: false,
+  readyForExit: false,
   canInstall: false,
   canRetryDownload: false,
   pendingFailureDialog: null,

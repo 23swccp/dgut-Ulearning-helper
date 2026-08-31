@@ -40,6 +40,7 @@ export type UpdateStatus = {
   unreadCount: number;
   downloading: boolean;
   handoff: boolean;
+  readyForExit: boolean;
   canInstall: boolean;
   canRetryDownload: boolean;
   pendingFailureDialog: {

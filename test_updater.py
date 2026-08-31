@@ -264,6 +264,25 @@ class UpdateManagerTests(unittest.TestCase):
             self.assertFalse(result["updateAvailable"])
             self.assertEqual(manager.snapshot()["state"], "idle")
 
+    def test_main_process_can_exit_only_after_installer_is_ready(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = self.make_manager(Path(directory))
+            stopped = []
+
+            manager._set_state("handoff")
+            self.assertTrue(manager.snapshot()["handoff"])
+            self.assertFalse(manager.snapshot()["readyForExit"])
+            result = manager.shutdown_for_update(lambda: stopped.append(True))
+            self.assertFalse(result["ok"])
+            self.assertEqual(stopped, [])
+
+            manager._set_state("waiting_for_exit")
+            self.assertTrue(manager.snapshot()["readyForExit"])
+            with patch("yxy_updater.close_assistant_tabs", return_value=0):
+                result = manager.shutdown_for_update(lambda: stopped.append(True))
+            self.assertTrue(result["ok"])
+            self.assertEqual(stopped, [True])
+
     def test_download_failure_after_retries_records_message(self):
         content = b"fake-zip"
         manifest = make_manifest("0.3.0", self.sha_for(content))
