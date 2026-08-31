@@ -12,10 +12,10 @@ import threading
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from app_paths import frontend_dist
 from backend_commands import backend, handle, update_manager
 
 
@@ -23,9 +23,9 @@ SHUTDOWN_EVENT = threading.Event()
 CLIENT_CLOSED_EVENT = threading.Event()
 CLIENT_STATE_LOCK = threading.Lock()
 CLIENT_LAST_SEEN = 0.0
-STATIC_ROOT = Path(__file__).resolve().parent / "web" / "dist"
+STATIC_ROOT = frontend_dist()
 DEFAULT_FRONTEND_ORIGIN = "http://127.0.0.1:1420"
-ALLOWED_FRONTEND_PORTS = {8765, *range(1420, 1440)}
+ALLOWED_FRONTEND_PORTS = {*range(8765, 8785), *range(1420, 1440)}
 
 
 def allowed_cors_origin(origin: str | None) -> str:

@@ -5,16 +5,17 @@ from __future__ import annotations
 import threading
 from collections import deque
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from app_paths import data_root
 from yxy_backend import SignBackend
 from yxy_updater import UpdateManager
 from version import APP_NAME, APP_VERSION, GITHUB_REPO, RELEASE_API
 
 
-ROOT = Path(__file__).resolve().parent
+# 配置、登录缓存、浏览器资料、日志与更新状态都属于用户数据，统一写入程序目录。
+ROOT = data_root()
 class EventBuffer:
     """线程安全的有限事件流；读取使用游标，不会消费事件。"""
 
@@ -116,7 +117,15 @@ def handle(command: str, payload: dict[str, Any]) -> dict[str, Any]:
         threading.Thread(target=launch, name="browser-launch", daemon=True).start()
         return {"ok": True}
     if command == "load_session_and_courses":
-        return {"ok": backend.load_session_and_courses(), "courses": courses()}
+        try:
+            wait_seconds = max(1, min(5, int(payload.get("waitSeconds", 1))))
+        except (TypeError, ValueError):
+            wait_seconds = 1
+        automatic = bool(payload.get("automatic", False))
+        return {
+            "ok": backend.load_session_and_courses(wait_seconds=wait_seconds, automatic=automatic),
+            "courses": courses(),
+        }
     if command == "select_course":
         course = backend.select_course(str(payload.get("query", "")))
         value = {"id": course.id, "name": course.name, "teacherName": course.teacher_name} if course else None

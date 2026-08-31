@@ -111,6 +111,25 @@ function App() {
     void detectInstalledBrowsers();
   }, []);
   useEffect(() => {
+    if (phase !== "login") return;
+    let disposed = false;
+    let checking = false;
+    const detectLogin = async () => {
+      if (checking) return;
+      checking = true;
+      const result = await call("load_session_and_courses", { automatic: true, waitSeconds: 1 });
+      checking = false;
+      if (disposed || !result.ok || !result.courses?.length) return;
+      setCourses(result.courses);
+      setPhase("courses");
+      setBusy(false);
+      append("已自动检测到登录状态，请在下方选择课程。");
+    };
+    void detectLogin();
+    const timer = window.setInterval(() => void detectLogin(), 1500);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [phase]);
+  useEffect(() => {
     let disposed = false;
     const pullEvents = async () => {
       try { const result = await call("get_events", { afterSeq: courseLastSeqRef.current }); if (!disposed) {
@@ -316,7 +335,7 @@ function App() {
     append("登录缓存不可用，正在自动打开优学院登录页…");
     setPhase("login");
     const opened = await call("start_browser", loginPayload);
-    append(opened.ok ? "登录页已准备好。完成浏览器登录后回到这里，按 Enter 继续。" : `启动浏览器失败：${opened.error || "未知错误"}`);
+    append(opened.ok ? "登录页已准备好。请在浏览器中完成登录，程序将自动继续。" : `启动浏览器失败：${opened.error || "未知错误"}`);
     setBusy(false);
   }
   async function runLearning() {
@@ -377,16 +396,14 @@ function App() {
       setBusy(false); return;
     }
     if (phase === "login") {
-      const result = await call("load_session_and_courses");
-      if (result.ok && result.courses?.length) { setCourses(result.courses); setPhase("courses"); }
-      else append("尚未检测到有效登录状态。完成浏览器登录后按 Enter 重试。");
+      append("正在自动检测浏览器登录状态，请稍候。");
     } else if (phase === "ready") {
       const result = await call("load_saved_courses");
       if (result.ok && result.courses?.length) { setCourses(result.courses); setPhase("courses"); }
       else {
         append("登录缓存不可用，正在自动打开优学院登录页…"); setPhase("login");
         const opened = await call("start_browser", loginPayload);
-        append(opened.ok ? "完成浏览器登录后回到这里，按 Enter 继续。" : `启动浏览器失败：${opened.error || "未知错误"}`);
+        append(opened.ok ? "请在浏览器中完成登录，程序将自动继续。" : `启动浏览器失败：${opened.error || "未知错误"}`);
       }
     } else if (phase === "selected") {
       if (input === "/") { await call("clear_selected_course"); setPhase("courses"); append("已取消选定。 "); }
@@ -452,7 +469,7 @@ function App() {
       </AnimatePresence>
       <div className="workspace-content">
       {showHeaderUpdate && <UpdateBell status={updateStatus} open={drawerOpen} onToggle={toggleDrawer} />}
-      {page === "terminal" && <section className={`terminal ${phase === "courses" ? "course-picking" : ""}`}><pre ref={endRef}>{logs.join("\n")}</pre><div className="command"><b>›</b><input ref={commandRef} aria-label="课程签到命令" autoFocus disabled={busy} value={command} onChange={event => setCommand(event.target.value)} onKeyDown={handleSignKeyDown} placeholder={busy ? "正在自动读取登录缓存…" : phase === "login" ? "完成浏览器登录后按 Enter…" : phase === "courses" ? "搜索课程，↑↓ 选择，Enter 确认…" : phase === "selected" ? "按 Enter 开始监测，输入 / 重新选课…" : phase === "monitoring" ? "正在监测；输入 / 停止…" : "正在准备签到模块…"}/></div>{phase === "courses" && <motion.div className="course-quick-pick" ref={coursePickerRef} initial={reduceMotion ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}><div className="course-picker-head"><strong>选择签到课程</strong><span>{matchingCourses.length} / {courseChoices.length} 门</span></div><div className="course-options" role="listbox" aria-label="课程列表">{matchingCourses.length ? matchingCourses.map((course, index) => <button key={course.id} type="button" role="option" aria-selected={index === courseCursor} className={`course-option ${index === courseCursor ? "active" : ""}`} onMouseEnter={() => setCourseCursor(index)} onClick={() => void chooseSignCourse(course)}><span><strong>{course.name}</strong><small>{course.teacherName || "未知教师"}</small></span><code>ID {course.id}</code></button>) : <div className="course-empty">没有匹配课程，请换个关键词。</div>}</div><div className="course-picker-help">↑↓ 移动　Enter 选择　Esc 清空搜索</div></motion.div>}</section>}
+      {page === "terminal" && <section className={`terminal ${phase === "courses" ? "course-picking" : ""}`}><pre ref={endRef}>{logs.join("\n")}</pre><div className="command"><b>›</b><input ref={commandRef} aria-label="课程签到命令" autoFocus disabled={busy || phase === "login"} value={command} onChange={event => setCommand(event.target.value)} onKeyDown={handleSignKeyDown} placeholder={busy ? "正在自动读取登录缓存…" : phase === "login" ? "等待浏览器登录，完成后自动继续…" : phase === "courses" ? "搜索课程，↑↓ 选择，Enter 确认…" : phase === "selected" ? "按 Enter 开始监测，输入 / 重新选课…" : phase === "monitoring" ? "正在监测；输入 / 停止…" : "正在准备签到模块…"}/></div>{phase === "courses" && <motion.div className="course-quick-pick" ref={coursePickerRef} initial={reduceMotion ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}><div className="course-picker-head"><strong>选择签到课程</strong><span>{matchingCourses.length} / {courseChoices.length} 门</span></div><div className="course-options" role="listbox" aria-label="课程列表">{matchingCourses.length ? matchingCourses.map((course, index) => <button key={course.id} type="button" role="option" aria-selected={index === courseCursor} className={`course-option ${index === courseCursor ? "active" : ""}`} onMouseEnter={() => setCourseCursor(index)} onClick={() => void chooseSignCourse(course)}><span><strong>{course.name}</strong><small>{course.teacherName || "未知教师"}</small></span><code>ID {course.id}</code></button>) : <div className="course-empty">没有匹配课程，请换个关键词。</div>}</div><div className="course-picker-help">↑↓ 移动　Enter 选择　Esc 清空搜索</div></motion.div>}</section>}
       {page === "learning" && <section className="terminal learning-terminal">
         <div className="course-status" aria-label="刷课实时状态">
           <div className="course-status-head"><strong className={`run-state ${courseStatus.stalled || courseStatus.paused ? "warning" : helperRunning ? "success" : ""}`}>{runStateLabel(courseStatus)}</strong><span className={courseStatus.connected ? "connected" : "disconnected"}>{connectionLabel(courseStatus)}</span><span className="course-name">{courseStatus.courseName || "未识别课程"}</span></div>

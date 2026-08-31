@@ -65,7 +65,7 @@
 }
 
 .course-quick-pick {
-  width: min(760px, calc(100% - 140px));
+  width: auto;
   margin: 0 70px 28px;
   overflow: hidden;
   border: 1px solid #dfe4e8;
@@ -676,7 +676,7 @@
 }
 
 
-/* 关于页采用文档站排版：窄正文、锚点标题和随滚动高亮的页内目录。 */
+/* 关于页：正文来自 ABOUT.md，只保留中性的文档排版。 */
 .about-page {
   max-width: 1080px;
   margin: 0 auto;
@@ -689,51 +689,11 @@
   align-items: start;
   gap: 64px;
   transform: translateX(24px);
-  overflow: visible;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
 }
 
 .about-content {
   min-width: 0;
   padding: 52px 0 80px;
-}
-
-.about-heading {
-  padding: 0 0 30px;
-  border-bottom: 1px solid #e7e7e9;
-}
-
-.about-heading h1 {
-  margin: 0 0 22px;
-  color: #29292c;
-  font-size: 28px;
-  font-weight: 650;
-  letter-spacing: -.35px;
-  line-height: 1.35;
-}
-
-.about-reading-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  color: #929298;
-  font-size: 13px;
-}
-
-.about-reading-meta span + span {
-  padding-left: 8px;
-  border-left: 1px solid #c9c9cd;
-}
-
-.about-heading > p:last-child {
-  margin: 20px 0 0;
-  color: #58585f;
-  font-size: 16px;
-  line-height: 1.75;
 }
 
 .about-sidebar {
@@ -744,19 +704,24 @@
 }
 
 .about-toc {
-  position: static;
-  z-index: 1;
   display: flex;
   flex-direction: column;
-  flex-wrap: nowrap;
-  gap: 0;
-  max-height: none;
-  overflow: visible;
+  max-height: calc(100vh - 72px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 8px 0 8px 17px;
-  border: 0;
-  border-left: 1px solid #dfe3e1;
-  background: transparent;
-  backdrop-filter: none;
+  border-left: 1px solid #dedee1;
+  scrollbar-color: #d4d4d7 transparent;
+  scrollbar-width: thin;
+}
+
+.about-toc::-webkit-scrollbar {
+  width: 4px;
+}
+
+.about-toc::-webkit-scrollbar-thumb {
+  border-radius: 2px;
+  background: #d4d4d7;
 }
 
 .about-toc strong {
@@ -766,9 +731,12 @@
   font-weight: 600;
 }
 
+.about-toc .toc-group-title {
+  margin-top: 10px;
+}
+
 .about-toc a {
   position: relative;
-  border-radius: 0;
   padding: 5px 0;
   color: #6f6f76;
   font-size: 14px;
@@ -779,18 +747,16 @@
 .about-toc a.sub {
   padding-left: 16px;
   color: #8b8b91;
-  font-size: 14px;
 }
 
 .about-toc a:hover,
-.about-toc a:focus-visible {
-  background: transparent;
+.about-toc a:focus-visible,
+.about-toc a.active {
   color: #18709a;
   outline: none;
 }
 
 .about-toc a.active {
-  color: #18709a;
   font-weight: 500;
 }
 
@@ -801,22 +767,35 @@
   bottom: 5px;
   left: -18px;
   width: 2px;
-  border-radius: 2px;
   background: #18709a;
 }
 
-.about-toc a.sub.active::before {
-  left: -31px;
+.about-markdown {
+  color: #3c3c43;
+  font-size: 16px;
+  line-height: 1.8;
 }
 
-.guide-section {
-  scroll-margin-top: 24px;
-  padding: 48px 0 0;
-  border: 0;
-}
-
-.guide-section h2 {
+.about-markdown h1 {
   margin: 0 0 18px;
+  color: #29292c;
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: -.35px;
+  line-height: 1.35;
+}
+
+.about-markdown h1 + p {
+  margin: 0 0 20px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid #e7e7e9;
+  color: #8b8b91;
+  font-size: 13px;
+}
+
+.about-markdown h2 {
+  scroll-margin-top: 24px;
+  margin: 48px 0 18px;
   padding-top: 24px;
   border-top: 1px solid #e7e7e9;
   color: #29292c;
@@ -826,18 +805,57 @@
   line-height: 1.45;
 }
 
-.about-heading + .guide-section h2 {
+.about-markdown h1 + h2 {
+  margin-top: 32px;
   padding-top: 0;
   border-top: 0;
 }
 
-.guide-section h3 {
+.about-markdown h3 {
   scroll-margin-top: 24px;
   margin: 34px 0 14px;
   color: #323237;
   font-size: 20px;
   font-weight: 600;
   line-height: 1.5;
+}
+
+.about-markdown p {
+  margin: 12px 0 16px;
+  color: #3c3c43;
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.about-markdown ul,
+.about-markdown ol {
+  margin: 14px 0 20px;
+  padding-left: 27px;
+}
+
+.about-markdown li + li {
+  margin-top: 6px;
+}
+
+.about-markdown a {
+  color: #18709a;
+  text-decoration: underline;
+  text-decoration-color: #a9cbd9;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.about-markdown a:hover {
+  text-decoration-color: currentColor;
+}
+
+.about-markdown .external-link-mark {
+  display: inline-block;
+  margin-left: 3px;
+  font-size: .72em;
+  line-height: 1;
+  text-decoration: none;
+  transform: translateY(-.18em);
 }
 
 .header-anchor {
@@ -849,35 +867,13 @@
   transition: opacity .15s ease;
 }
 
-.guide-section h2:hover .header-anchor,
-.guide-section h3:hover .header-anchor,
+.about-markdown h2:hover .header-anchor,
+.about-markdown h3:hover .header-anchor,
 .header-anchor:focus-visible {
   opacity: 1;
 }
 
-.guide-section p,
-.guide-section li {
-  color: #3c3c43;
-  font-size: 16px;
-  line-height: 1.8;
-}
-
-.guide-section p {
-  max-width: none;
-  margin: 12px 0 16px;
-}
-
-.guide-section ul,
-.guide-section ol {
-  margin: 14px 0 20px;
-  padding-left: 27px;
-}
-
-.guide-section li + li {
-  margin-top: 6px;
-}
-
-.about-document :not(pre) > code {
+.about-markdown :not(pre) > code {
   display: inline;
   padding: 1px 5px;
   border-radius: 3px;
@@ -886,54 +882,51 @@
   font-size: .92em;
 }
 
-.guide-note {
-  margin: 22px 0;
-  padding: 15px 18px;
-  border-left: 4px solid #3f8fb2;
-  background: #f3f7f9;
-  color: #454f54;
-  font-size: 15px;
-  line-height: 1.8;
-}
-
-.guide-note-warning {
-  border-left-color: #c69236;
-  background: #fff9ed;
-  color: #665a43;
-}
-
-.guide-figure {
-  margin: 34px auto 42px;
-}
-
-.guide-figure img {
-  display: block;
-  width: 100%;
-  margin: 0 auto;
-  border: 0;
-  border-radius: 8px;
+.about-markdown pre {
+  margin: 18px 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  border: 1px solid #e2e2e5;
+  border-radius: 4px;
   background: #f7f7f8;
-  box-shadow: 0 8px 24px #00000010;
 }
 
-.guide-figure figcaption {
-  margin-top: 8px;
-  color: #8e8e93;
-  font-size: 12px;
-  line-height: 1.65;
-  text-align: center;
+.about-markdown pre code {
+  display: block;
+  padding: 0;
+  background: transparent;
+  color: #3c3c43;
+  font: 13px/1.7 "Cascadia Mono", monospace;
+  white-space: pre;
 }
 
-.guide-table {
+.about-markdown blockquote {
+  margin: 18px 0;
+  padding: 0 0 0 16px;
+  border-left: 2px solid #d4d4d7;
+}
+
+.about-markdown blockquote p {
+  color: #68686f;
+}
+
+.about-markdown hr {
+  height: 1px;
+  margin: 32px 0;
+  border: 0;
+  background: #e7e7e9;
+}
+
+.about-markdown table {
   width: 100%;
-  margin: 14px 0 24px;
+  margin: 16px 0 24px;
   border-collapse: collapse;
   color: #3c3c43;
   font-size: 14px;
 }
 
-.guide-table th,
-.guide-table td {
+.about-markdown th,
+.about-markdown td {
   padding: 12px 14px;
   border: 1px solid #dedee1;
   line-height: 1.65;
@@ -941,35 +934,107 @@
   vertical-align: top;
 }
 
-.guide-table th {
+.about-markdown th {
   background: #f6f6f7;
   color: #323237;
   font-weight: 600;
 }
 
-.guide-table th:first-child,
-.guide-table td:first-child {
+.about-markdown th:first-child,
+.about-markdown td:first-child {
   width: 190px;
 }
 
-.guide-about {
-  padding-bottom: 32px;
+.about-markdown img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 28px auto 10px;
 }
 
-.guide-about a {
-  color: #18709a;
+.about-markdown p:has(> img) {
+  text-align: center;
+}
+
+.about-markdown .markdown-figure {
+  display: block;
+  margin: 28px auto 18px;
+  text-align: center;
+}
+
+.about-markdown .markdown-figure img {
+  margin: 0 auto 8px;
+}
+
+.about-markdown .markdown-figure-caption {
+  display: block;
+  color: #8b8b91;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* 文档首页：MAA 风格的居中项目头图、名称与本地样式徽章。 */
+.about-markdown > p:first-child {
+  margin: 0;
+  text-align: center;
+}
+
+.about-markdown > p:first-child > img {
+  width: min(340px, 72vw);
+  margin: 0 auto 18px;
+}
+
+.about-markdown > p:first-child + h1 {
+  margin: 0;
+  color: #29292c;
+  font-size: 42px;
+  font-weight: 500;
+  letter-spacing: -.8px;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.about-markdown > p:first-child + h1 + p {
+  margin: 8px 0 12px;
+  padding: 0;
+  border: 0;
+  color: #55565b;
+  font-size: 18px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.about-markdown > p:first-child + h1 + p + p {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 0 0 34px;
+}
+
+.about-markdown > p:first-child + h1 + p + p a {
+  display: inline-flex;
+  line-height: 0;
   text-decoration: none;
 }
 
-.guide-about a:hover {
-  text-decoration: underline;
+.about-markdown > p:first-child + h1 + p + p img {
+  display: block;
+  width: auto;
+  height: 20px;
+  margin: 0;
+}
+
+.workspace-content > .about-settings-body {
+  border: 0;
+  border-radius: 0;
+  background: #fff;
 }
 
 @media (max-width: 900px) {
   .about-document {
     display: flex;
     flex-direction: column;
-    gap: 0;
     transform: none;
   }
 
@@ -977,14 +1042,13 @@
     order: -1;
     width: 100%;
     position: static;
+    padding-top: 0;
   }
 
   .about-toc {
-    position: static;
     flex-direction: row;
     flex-wrap: wrap;
     gap: 2px 14px;
-    max-height: none;
     padding: 8px 0 14px;
     border-left: 0;
     border-bottom: 1px solid #e3e6e4;
@@ -999,22 +1063,16 @@
     padding: 4px 0;
   }
 
-  .about-toc a.sub {
+  .about-toc a.sub,
+  .about-toc a.active::before {
     display: none;
   }
 
-  .guide-table th:first-child,
-  .guide-table td:first-child {
+  .about-markdown th:first-child,
+  .about-markdown td:first-child {
     width: 130px;
   }
 }
-
-.workspace-content > .about-settings-body {
-  border: 0;
-  border-radius: 0;
-  background: #fff;
-}
-
 /* 刷课页：状态快照、关键事件和命令区互相独立。 */
 .learning-terminal {
   display: block;

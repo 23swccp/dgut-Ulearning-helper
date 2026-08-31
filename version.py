@@ -13,6 +13,8 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
+from app_paths import data_root, resource_root
+
 
 APP_NAME = "优学院助手"
 APP_VERSION = "0.2.1"
@@ -38,11 +40,17 @@ def normalize_github_repository(value: str) -> str:
 
 
 def _repository_from_source_file() -> str:
-    try:
-        data = json.loads((ROOT / "release-source.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        return ""
-    return normalize_github_repository(data.get("repository", "")) if isinstance(data, dict) else ""
+    """发布包的 release-source.json 位于发行目录顶层；开发时在源码目录。"""
+    for base in (data_root(), resource_root()):
+        try:
+            data = json.loads((base / "release-source.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        if isinstance(data, dict):
+            repo = normalize_github_repository(data.get("repository", ""))
+            if repo:
+                return repo
+    return ""
 
 
 def _repository_from_git_config() -> str:

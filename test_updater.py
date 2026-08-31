@@ -3,6 +3,7 @@
 import hashlib
 import io
 import json
+import sys
 import tempfile
 import threading
 import unittest
@@ -406,6 +407,27 @@ class UpdateManagerTests(unittest.TestCase):
             self.assertEqual(raw["state"], "download_failed")
             self.assertEqual(raw["latestVersion"], "0.3.0")
 
+    def test_check_failure_keeps_ready_to_install_package(self):
+        content, sha = make_zip_bytes()
+        manifest = make_manifest("0.3.0", sha, size=len(content))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manager = self.make_manager(root)
+            (root / ".update").mkdir(parents=True, exist_ok=True)
+            (root / ".update" / "package.zip").write_bytes(content)
+            manager._mutate(
+                latestVersion="0.3.0", downloadUrl=manifest["url"], sha256=manifest["sha256"],
+                size=len(content), changelog=manifest["changelog"], total=len(content), downloaded=len(content),
+            )
+            manager._set_state("ready_to_install")
+            manager._persist(force=True)
+            # 网络故障：检查更新抛错时不得丢弃待安装状态
+            with patch.object(manager, "release_api", ""):
+                result = manager.check()
+            self.assertFalse(result["ok"])
+            self.assertEqual(manager.snapshot()["state"], "ready_to_install")
+            self.assertTrue(manager.snapshot()["canInstall"])
+
     def test_waiting_for_exit_restores_result_once(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -619,6 +641,96 @@ class HandshakeTests(unittest.TestCase):
             self.assertEqual(wait_for_ready(ready, timeout=1, poll=lambda _t: None)["pid"], 42)
             missing = Path(directory) / "missing.json"
             self.assertIsNone(wait_for_ready(missing, timeout=0.3, poll=lambda _t: None))
+
+
+class FrozenReleaseTests(unittest.TestCase):
+    """PyInstaller onedir 发行版的更新器行为。"""
+
+    def make_installer(self, root: Path) -> updater_installer.Installer:
+        payload = {
+            "installDir": str(root),
+            "zip": str(root / "pkg.zip"),
+            "sha256": "",
+            "expectedVersion": "0.3.0",
+            "fromVersion": "0.2.0",
+            "readyFile": str(root / "ready.json"),
+        }
+        installer = updater_installer.Installer(payload, updater_installer.Progress(use_window=False))
+        installer.workdir = root / "work"
+        installer.workdir.mkdir(parents=True, exist_ok=True)
+        installer.stage = installer.workdir / "staging"
+        installer.backup = installer.workdir / "backup"
+        installer.log_path = installer.workdir / "updater.log"
+        return installer
+
+    def make_manager(self, root: Path) -> UpdateManager:
+        return UpdateManager(
+            root,
+            version="0.2.0",
+            release_api="https://api.example.com/releases/latest",
+            emit_event=lambda *args, **kwargs: {},
+            sleep=lambda _seconds: None,
+        )
+
+    def test_frozen_installer_workdir_follows_executable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(sys, "frozen", True, create=True):
+                payload = {
+                    "installDir": directory,
+                    "zip": str(Path(directory) / "pkg.zip"),
+                    "readyFile": str(Path(directory) / "ready.json"),
+                }
+                installer = updater_installer.Installer(payload, updater_installer.Progress(use_window=False))
+                self.assertEqual(installer.workdir, Path(sys.executable).resolve().parent)
+
+    def test_frozen_verify_accepts_internal_version_and_top_level_dist(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "_internal").mkdir()
+            (root / "_internal" / "version.py").write_text('APP_VERSION = "0.3.0"', encoding="utf-8")
+            (root / "web" / "dist").mkdir(parents=True)
+            (root / "web" / "dist" / "index.html").write_text("<html>", encoding="utf-8")
+            self.make_installer(root).verify_new_version()
+
+    def test_frozen_verify_rejects_incomplete_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "_internal").mkdir()
+            (root / "_internal" / "version.py").write_text('APP_VERSION = "0.3.0"', encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                self.make_installer(root).verify_new_version()
+
+    def test_frozen_restart_launches_release_executable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installer = self.make_installer(root)
+            with patch.object(sys, "frozen", True, create=True), \
+                    patch("updater_installer.subprocess.Popen") as popen:
+                installer.restart()
+            command = popen.call_args.args[0]
+            self.assertEqual(Path(command[0]).name, "dgut-bot.exe")
+
+    def test_frozen_installer_command_copies_bundled_updater_exe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundled = root / "res" / "updater" / "updater.exe"
+            bundled.parent.mkdir(parents=True)
+            (bundled.parent / "_internal").mkdir()
+            bundled.write_bytes(b"MZ")
+            (root / "run").mkdir()
+            with patch.object(sys, "frozen", True, create=True), \
+                    patch("yxy_updater.resource_root", return_value=root / "res"):
+                command = self.make_manager(root)._installer_command(root / "run")
+            self.assertEqual(Path(command[0]), root / "run" / "updater" / "updater.exe")
+            self.assertTrue((root / "run" / "updater" / "updater.exe").is_file())
+
+    def test_frozen_installer_command_requires_bundled_updater(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(sys, "frozen", True, create=True), \
+                    patch("yxy_updater.resource_root", return_value=root / "empty"):
+                with self.assertRaises(UpdateError):
+                    self.make_manager(root)._installer_command(root / "run")
 
 
 if __name__ == "__main__":

@@ -173,6 +173,33 @@ class BackendTests(unittest.TestCase):
             self.assertIn("--remote-debugging-port=9222", command)
             self.assertIn(url, command)
 
+    def test_automatic_login_probe_is_quiet_and_non_blocking_while_waiting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            messages = []
+            backend = SignBackend(lambda text, kind: messages.append((text, kind)), root=Path(directory))
+            messages.clear()
+            with patch.object(backend, "_get_ws_url", return_value=None), patch("yxy_backend.time.sleep") as sleep:
+                self.assertFalse(backend.load_session_and_courses(wait_seconds=1, automatic=True))
+            sleep.assert_not_called()
+            self.assertEqual(messages, [])
+
+    def test_automatic_login_probe_loads_courses_after_cookie_appears(self):
+        with tempfile.TemporaryDirectory() as directory:
+            backend = self.make_backend(Path(directory))
+            cookies = [
+                {"domain": ".dgut.edu.cn", "name": "AUTHORIZATION", "value": "test-token"},
+                {"domain": ".dgut.edu.cn", "name": "userid", "value": "123"},
+            ]
+            with (
+                patch.object(backend, "_get_ws_url", return_value="ws://test"),
+                patch.object(backend, "_cookies", return_value=cookies),
+                patch.object(backend, "_fetch_courses", return_value=[Course(101, "数据结构")]),
+            ):
+                self.assertTrue(backend.load_session_and_courses(wait_seconds=1, automatic=True))
+            self.assertEqual(backend.token, "test-token")
+            self.assertEqual(backend.user_id, 123)
+            self.assertEqual([course.id for course in backend.courses], [101])
+
     def test_browser_detection_reports_paths_and_prefers_edge(self):
         with tempfile.TemporaryDirectory() as directory:
             backend = self.make_backend(Path(directory))

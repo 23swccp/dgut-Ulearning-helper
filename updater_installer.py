@@ -1,7 +1,8 @@
 """独立更新器：从临时目录运行，等待主程序退出后备份并替换程序文件。
 
 本文件会被复制到临时目录执行，因此只依赖标准库；不可 import 项目内其他模块。
-用法：pythonw updater_installer.py --payload payload.json
+开发模式：pythonw updater_installer.py --payload payload.json
+冻结模式：主程序把打包好的 _internal/updater/updater.exe 复制到临时目录后运行。
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from pathlib import Path
 APP_MUTEX_DEFAULT = r"Local\YxyAssistant.App"
 UPDATING_MUTEX_DEFAULT = r"Local\YxyAssistant.Updating"
 WAIT_APP_EXIT_TIMEOUT = 240.0
+APP_EXECUTABLE = "dgut-bot.exe"
 
 # 用户数据：永不覆盖、永不删除。
 PRESERVE = (
@@ -215,6 +217,18 @@ def assert_no_traversal(names: list[str]) -> None:
             raise ValueError(f"ZIP 路径穿越：{name}")
 
 
+def default_workdir() -> Path:
+    """更新器自己的工作目录。
+
+    冻结模式下更新器 EXE 由主程序复制到临时目录运行（主进程不假设系统有
+    python.exe/pythonw.exe），工作目录就是该 EXE 所在的临时目录；
+    开发模式下沿用脚本副本所在的临时目录。
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
 class Installer:
     def __init__(self, payload: dict, progress: Progress) -> None:
         self.payload = payload
@@ -228,7 +242,7 @@ class Installer:
         self.result_path = self.install_dir / "update-result.json"
         self.failures_path = self.install_dir / "update_failures.json"
         self.log_path = Path(payload.get("installerLog") or (self.install_dir / ".update" / "updater.log"))
-        self.workdir = Path(__file__).resolve().parent
+        self.workdir = default_workdir()
         self.stage = self.workdir / "staging"
         self.backup = self.workdir / "backup"
         self.backup_manifest: dict[str, list[str]] = {"files": []}
@@ -352,14 +366,24 @@ class Installer:
 
     def verify_new_version(self) -> None:
         self.progress.update(82, "正在校验新版本……")
-        version_file = self.install_dir / "version.py"
-        if not version_file.is_file():
-            raise RuntimeError("新版本缺少 version.py")
+        version_file = self._first_existing((self.install_dir / "version.py", self.install_dir / "_internal" / "version.py"))
+        if version_file is None:
+            raise RuntimeError("新版本缺少版本信息文件 version.py")
         if self.expected_version and self.expected_version not in version_file.read_text(encoding="utf-8"):
             raise RuntimeError("新版本 version.py 与预期版本不一致")
-        dist_index = self.install_dir / "web" / "dist" / "index.html"
-        if not dist_index.is_file():
+        dist_index = self._first_existing((
+            self.install_dir / "web" / "dist" / "index.html",
+            self.install_dir / "_internal" / "web" / "dist" / "index.html",
+        ))
+        if dist_index is None:
             raise RuntimeError("新版本缺少前端构建产物 web/dist")
+
+    @staticmethod
+    def _first_existing(candidates: tuple[Path, ...]) -> Path | None:
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        return None
 
     def cleanup(self) -> None:
         self.progress.update(92, "正在清理临时文件……")
@@ -374,10 +398,22 @@ class Installer:
 
     def restart(self) -> None:
         self.progress.update(97, "正在重新启动助手……")
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if sys.platform == "win32" else 0
+        if getattr(sys, "frozen", False):
+            # 冻结发行版没有 Python 解释器，直接重新拉起主程序 EXE。
+            subprocess.Popen(
+                [str(self.install_dir / APP_EXECUTABLE)],
+                cwd=str(self.install_dir),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=flags,
+                close_fds=True,
+            )
+            return
         python = Path(sys.base_prefix) / "pythonw.exe" if sys.platform == "win32" else Path(sys.executable)
         if not python.is_file():
             python = Path(sys.executable)
-        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if sys.platform == "win32" else 0
         subprocess.Popen(
             [str(python), str(self.install_dir / "browser_launcher.py")],
             cwd=str(self.install_dir),

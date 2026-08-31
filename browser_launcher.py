@@ -1,4 +1,9 @@
-"""管理浏览器版所需的本地 API、Vite 和调试浏览器。"""
+"""管理浏览器版所需的本地 API、Vite 和调试浏览器。
+
+冻结（PyInstaller onedir）模式下本文件同时是 dgut-bot.exe 的入口：
+无参数时作为启动器查找浏览器并拉起后台服务；带 --service 参数时
+作为后台服务进程运行，全程不需要系统安装 Python。
+"""
 
 from __future__ import annotations
 
@@ -9,17 +14,21 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from web_server import CLIENT_CLOSED_EVENT, LocalApiHandler, SHUTDOWN_EVENT, backend, client_last_seen, reset_client_state, update_manager
+from app_paths import data_root, frontend_dist, is_frozen
+from backend_commands import backend, emit_event
+from web_server import CLIENT_CLOSED_EVENT, LocalApiHandler, SHUTDOWN_EVENT, client_last_seen, reset_client_state, update_manager
 from yxy_mutex import APP_MUTEX, NamedMutex, app_mutex_exists, updating_mutex_exists
 
-ROOT = Path(__file__).resolve().parent
+ROOT = data_root()
 FRONTEND = ROOT / "web"
 LOG_PATH = ROOT / "browser-launcher.log"
 SERVICE_LOG_PATH = ROOT / "browser-service.log"
+APP_TITLE = "莞工小皮卡"
 DUPLICATE_NOTICE_SECONDS = 4.0
 # 助手页在用户切到优学院课件页后会成为后台标签；Chromium 会明显降低
 # 后台定时器频率。真正关闭标签页有 pagehide/sendBeacon 这条快速路径，
@@ -61,8 +70,8 @@ def print_startup_help() -> None:
     print("-" * 72)
 
 
-def choose_frontend_port(start: int = 1420, attempts: int = 20) -> int:
-    """选择空闲端口，避免旧 Vite 进程导致新启动器误判成功。"""
+def choose_available_port(start: int, attempts: int = 20) -> int:
+    """从指定端口开始选择空闲端口，避免与其它本机程序冲突。"""
     for port in range(start, start + attempts):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
             try:
@@ -70,7 +79,12 @@ def choose_frontend_port(start: int = 1420, attempts: int = 20) -> int:
             except OSError:
                 continue
             return port
-    raise RuntimeError(f"No free frontend port found in {start}-{start + attempts - 1}.")
+    raise RuntimeError(f"No free local port found in {start}-{start + attempts - 1}.")
+
+
+def choose_frontend_port(start: int = 1420, attempts: int = 20) -> int:
+    """兼容旧调用；开发前端默认在 1420-1439 中选择。"""
+    return choose_available_port(start, attempts)
 
 
 def wait_for_frontend(process: subprocess.Popen, health_url: str, timeout: float = 30) -> None:
@@ -191,27 +205,47 @@ def request_service_shutdown(web_url: str) -> None:
         pass
 
 
-def show_update_in_progress_window() -> None:
-    """更新互斥锁存在时弹出的小窗口；tkinter 不可用则退回终端提示。"""
-    message = "优学院助手正在更新\n\n更新完成后程序将自动重新启动，请勿重复打开。"
+def log_line(path: Path, message: str) -> None:
+    """无控制台的冻结进程把关键启动信息追加到日志文件。"""
+    try:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {message}\n")
+    except OSError:
+        pass
+
+
+def show_notice_window(message: str, title: str = APP_TITLE, auto_close_ms: int | None = None) -> None:
+    """无控制台的冻结进程用小窗口提示；tkinter 不可用时静默返回。"""
     try:
         import tkinter as tk
 
         root = tk.Tk()
-        root.title("优学院助手正在更新")
+        root.title(title)
         root.attributes("-topmost", True)
         root.resizable(False, False)
-        tk.Label(root, text=message, justify="left", padx=24, pady=16).pack()
-        root.after(10000, root.destroy)
+        tk.Label(root, text=message, justify="left", padx=24, pady=16, wraplength=380).pack()
+        if auto_close_ms:
+            root.after(auto_close_ms, root.destroy)
         root.mainloop()
         return
-    except Exception:  # noqa: BLE001 - 无桌面环境时只打印提示
+    except Exception:  # noqa: BLE001 - 无桌面环境时放弃提示
         pass
-    print(message)
+
+
+def show_update_in_progress_window() -> None:
+    """更新互斥锁存在时弹出的小窗口。"""
+    show_notice_window(
+        "优学院助手正在更新\n\n更新完成后程序将自动重新启动，请勿重复打开。",
+        title="优学院助手正在更新",
+        auto_close_ms=10000,
+    )
 
 
 def show_already_running_notice() -> None:
-    """重复启动时让终端提示停留片刻，避免批处理窗口一闪而过。"""
+    """重复启动时提示片刻，避免窗口一闪而过；冻结模式改用图形提示。"""
+    if is_frozen():
+        show_notice_window(f"{APP_TITLE}已在运行，请勿重复打开。", auto_close_ms=int(DUPLICATE_NOTICE_SECONDS * 1000))
+        return
     print("优学院助手已在运行，请勿重复打开。")
     print(f"此窗口将在 {int(DUPLICATE_NOTICE_SECONDS)} 秒后自动关闭……")
     time.sleep(DUPLICATE_NOTICE_SECONDS)
@@ -219,10 +253,14 @@ def show_already_running_notice() -> None:
 
 def static_frontend_available() -> bool:
     """发布包模式：有构建产物且没有 node_modules 时，由本地 API 服务直接托管前端。"""
-    return (FRONTEND / "dist" / "index.html").is_file() and not (FRONTEND / "node_modules" / ".bin" / "vite.cmd").is_file()
+    if is_frozen():
+        return True
+    if not (frontend_dist() / "index.html").is_file():
+        return False
+    return not (FRONTEND / "node_modules" / ".bin" / "vite.cmd").is_file()
 
 
-def run_background_service(web_port: int, use_static: bool = False) -> int:
+def run_background_service(web_port: int, use_static: bool = False, api_port: int = 8765) -> int:
     """独立持有 API 与前端；启动终端被关闭后此进程仍继续运行。"""
     SHUTDOWN_EVENT.clear()
     reset_client_state()
@@ -238,15 +276,19 @@ def run_background_service(web_port: int, use_static: bool = False) -> int:
     vite: subprocess.Popen | None = None
     log_file = None
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", 8765), LocalApiHandler)
+        server_port = web_port if use_static else api_port
+        server = ThreadingHTTPServer(("127.0.0.1", server_port), LocalApiHandler)
         threading.Thread(target=server.serve_forever, name="local-api", daemon=True).start()
-        log_file = LOG_PATH.open("w", encoding="utf-8")
         if use_static:
             print(f"发布包模式：由本地服务直接托管 web/dist，前端地址 http://127.0.0.1:{web_port}", flush=True)
         else:
+            log_file = LOG_PATH.open("w", encoding="utf-8")
+            vite_env = os.environ.copy()
+            vite_env["YXY_API_PORT"] = str(api_port)
             vite = subprocess.Popen(
                 [npm, "run", "dev", "--", "--port", str(web_port), "--strictPort"],
                 cwd=FRONTEND,
+                env=vite_env,
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
@@ -282,20 +324,39 @@ def run_background_service(web_port: int, use_static: bool = False) -> int:
         app_mutex.release()
 
 
-def start_background_service(web_port: int, use_static: bool = False) -> subprocess.Popen:
+def service_command(web_port: int, use_static: bool, api_port: int = 8765) -> list[str]:
+    """后台服务命令行：冻结模式通过当前 EXE 自启动，开发模式使用当前解释器。"""
+    if is_frozen():
+        command = [sys.executable, "--service", str(web_port), "--api-port", str(api_port)]
+    else:
+        service_python = Path(sys.base_prefix) / ("pythonw.exe" if sys.platform == "win32" else "bin/python")
+        if not service_python.is_file():
+            service_python = Path(sys.executable)
+        command = [str(service_python), str(Path(__file__).resolve()), "--service", str(web_port), "--api-port", str(api_port)]
+    if use_static:
+        command.append("--static")
+    return command
+
+
+def start_background_service(web_port: int, use_static: bool = False, api_port: int = 8765) -> subprocess.Popen:
     flags = 0
     if sys.platform == "win32":
         flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    if is_frozen():
+        # 冻结的服务进程把输出写进自己的日志文件，不需要继承句柄。
+        return subprocess.Popen(
+            service_command(web_port, use_static, api_port),
+            cwd=ROOT,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=flags,
+            close_fds=True,
+        )
     service_log = SERVICE_LOG_PATH.open("w", encoding="utf-8")
-    service_python = Path(sys.base_prefix) / ("pythonw.exe" if sys.platform == "win32" else "bin/python")
-    if not service_python.is_file():
-        service_python = Path(sys.executable)
-    command = [str(service_python), str(Path(__file__).resolve()), "--service", str(web_port)]
-    if use_static:
-        command.append("--static")
     try:
         return subprocess.Popen(
-            command,
+            service_command(web_port, use_static, api_port),
             cwd=ROOT,
             stdin=subprocess.DEVNULL,
             stdout=service_log,
@@ -307,10 +368,63 @@ def start_background_service(web_port: int, use_static: bool = False) -> subproc
         service_log.close()
 
 
+def redirect_frozen_output() -> None:
+    """无控制台的冻结进程把 stdout/stderr 落到日志文件，避免诊断信息丢失。"""
+    if sys.platform != "win32":
+        return
+    target = SERVICE_LOG_PATH if "--service" in sys.argv else LOG_PATH
+    try:
+        handle = target.open("w", encoding="utf-8", buffering=1)
+        sys.stdout = handle
+        sys.stderr = handle
+    except OSError:
+        pass
+
+
+def main_frozen() -> int:
+    """免安装发行版入口：无控制台，浏览器缺失时通过网页设置处理。"""
+    if updating_mutex_exists():
+        show_update_in_progress_window()
+        return 0
+    if app_mutex_exists():
+        show_already_running_notice()
+        return 0
+    SHUTDOWN_EVENT.clear()
+    reset_client_state()
+    try:
+        web_port = choose_available_port(8765)
+        web_url = f"http://127.0.0.1:{web_port}"
+        # 浏览器检测失败不再依赖终端输入：照常启动服务，由网页设置接管。
+        browser_mode = open_frontend("")
+        if browser_mode == "manual":
+            log_line(LOG_PATH, "未找到 Chromium 浏览器；请在网页设置的浏览器模块中选择或填写浏览器路径。")
+            emit_event("BROWSER_NOT_FOUND", "warning", "browser", "未找到 Chromium 浏览器，请在设置中手动选择浏览器程序。")
+        log_line(LOG_PATH, "正在启动本地网页服务…")
+        service = start_background_service(web_port, use_static=True, api_port=web_port)
+        wait_for_frontend(service, f"{web_url}/api/health")
+        if browser_mode == "manual":
+            try:
+                # 没有调试浏览器时用系统默认浏览器打开界面，让用户在设置中配置。
+                os.startfile(web_url)  # noqa: S606
+            except OSError:
+                log_line(LOG_PATH, f"系统默认浏览器打开失败；请手动访问 {web_url}")
+        else:
+            backend.start_browser(web_url)
+        return 0
+    except Exception as error:  # noqa: BLE001 - 无控制台：所有启动错误必须落盘
+        log_line(LOG_PATH, f"启动失败：{error!r}")
+        show_notice_window(f"{APP_TITLE}启动失败：{error}\n详情见程序目录中的 browser-launcher.log。")
+        return 1
+
+
 def main() -> int:
     if "--service" in sys.argv:
         index = sys.argv.index("--service")
-        return run_background_service(int(sys.argv[index + 1]), "--static" in sys.argv)
+        web_port = int(sys.argv[index + 1])
+        api_port = int(sys.argv[sys.argv.index("--api-port") + 1]) if "--api-port" in sys.argv else 8765
+        return run_background_service(web_port, "--static" in sys.argv, api_port)
+    if is_frozen():
+        return main_frozen()
     # 更新互斥锁优先：更新器接管期间拒绝一切重复启动请求。
     if updating_mutex_exists():
         show_update_in_progress_window()
@@ -338,9 +452,11 @@ def main() -> int:
     service: subprocess.Popen | None = None
     try:
         if use_static:
-            web_port = 8765
+            web_port = choose_available_port(8765)
+            api_port = web_port
         else:
             web_port = choose_frontend_port()
+            api_port = choose_available_port(8765)
         web_url = f"http://127.0.0.1:{web_port}"
         health_url = f"{web_url}/api/health"
 
@@ -351,7 +467,7 @@ def main() -> int:
             return 0
 
         print("浏览器准备完成，开始启动网页程序。")
-        service = start_background_service(web_port, use_static)
+        service = start_background_service(web_port, use_static, api_port)
         print("正在启动本地网页程序…")
         wait_for_frontend(service, health_url)
         print(f"本地网页程序已就绪：{web_url}")
@@ -389,5 +505,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    configure_console_encoding()
+    if is_frozen():
+        # 冻结进程没有控制台：先落日志，再跳过面向终端的编码配置。
+        redirect_frozen_output()
+    else:
+        configure_console_encoding()
     raise SystemExit(main())

@@ -26,17 +26,23 @@
 
 ### 使用发布版（推荐）
 
-1. 从 [Releases](https://github.com/23swccp/dgut-bot/releases/latest) 下载最新 ZIP 并完整解压。
-2. 安装 Python 3.10 或更高版本，并确保 `python` 已加入 `PATH`。
-3. 在解压目录执行：
+1. 从 [Releases](https://github.com/23swccp/dgut-bot/releases/latest) 下载 `dgut-bot-vX.Y.Z-windows-x64.zip`。
+2. 右键 ZIP 选择“全部解压缩”，**完整解压到本地文件夹**。不要在压缩包预览窗口里直接双击 `dgut-bot.exe`。
+3. 双击 `dgut-bot.exe` 启动。
 
-   ```powershell
-   python -m pip install -r requirements.txt
-   ```
+不需要安装 Python，不需要安装 Node.js，也不需要执行 `pip install`。程序会优先使用设置中保存的浏览器，然后依次检测 Edge、Chrome 和其他 Chromium 浏览器。
 
-4. 双击 `启动浏览器版.bat`。
+解压后的目录结构：
 
-发布包已经包含构建后的前端，无需安装 Node.js。程序会优先使用设置中保存的浏览器，然后依次检测 Edge、Chrome 和其他 Chromium 浏览器。
+```text
+dgut-bot-vX.Y.Z-windows-x64/
+├─ dgut-bot.exe      双击运行
+├─ _internal/        程序运行组件（PyInstaller onedir）
+├─ web/dist/         前端构建产物
+└─ README.md
+```
+
+运行过程中会按需在程序目录生成 `config.json`、`auth.json`、`browser_profile/`、`签到记录.md` 和 `.update/` 等本地数据；配置、登录缓存和日志都写在发行目录，不会写进系统临时目录。账号密码恢复界面目前尚未开放编辑。
 
 ### 从源码运行
 
@@ -60,7 +66,7 @@ cd ..
 
 1. 启动后进入“课程签到”。程序会自动读取本机登录缓存。
 2. 缓存有效时直接显示课程选择器；缓存无效时自动打开优学院登录页。
-3. 在浏览器完成登录后，回到小皮卡按 Enter 继续读取课程。
+3. 在浏览器完成登录后稍候片刻，小皮卡会自动检测登录状态并读取课程。
 4. 搜索并选择一门课程，按 Enter 开始监测。
 5. 输入 `/` 或 `stop` 停止监测；输入 `/` 可返回课程选择。
 
@@ -116,7 +122,7 @@ python quiz_simulator.py --show --hold 30
 | --- | --- | --- |
 | `config.json` | 浏览器、签到日志和课件学习设置 | 否 |
 | `auth.json` | Token 与用户 ID 缓存 | 否 |
-| `account.json` | 可选的本机账号恢复信息 | 否 |
+| `account.json` | 预留的本机账号恢复信息；当前界面尚未开放编辑 | 否 |
 | `browser_profile/` | 独立 Chromium 配置与登录状态 | 否 |
 | `签到记录.md` | 签到结果与错误详情 | 否 |
 | `browser-launcher.log` | 启动诊断日志 | 否 |
@@ -136,9 +142,9 @@ python quiz_simulator.py --show --hold 30
 
 ## 应用内更新
 
-程序启动后会检查 GitHub Release。发现新版本时在后台下载完整 ZIP，支持断点续传和最多三次自动重试；下载完成后校验 SHA-256，并等待用户确认安装。
+程序启动后会检查 GitHub Release。发现新版本时在后台下载完整 ZIP（`dgut-bot-vX.Y.Z-windows-x64.zip`），支持断点续传和最多三次自动重试；下载完成后校验 SHA-256，并等待用户确认安装。
 
-安装期间会关闭小皮卡自己的标签页、停止签到与刷课服务，然后由独立更新器替换程序文件。失败时自动回滚。以下本地数据在更新中不会被覆盖：
+安装期间会关闭小皮卡自己的标签页、停止签到与刷课服务，然后由独立更新器（发行包内 `_internal/updater/updater.exe`）在独立进程中替换程序文件，全程不依赖系统 Python。失败时自动回滚，旧版本仍可启动。以下本地数据在更新中不会被覆盖：
 
 ```text
 config.json
@@ -157,7 +163,7 @@ browser_profile/
 
 ### 登录后仍然读不到课程
 
-确认登录操作发生在小皮卡启动的独立调试浏览器中，而不是日常使用的另一个浏览器窗口。完成登录后回到课程签到模块按 Enter 重试。
+确认登录操作发生在小皮卡启动的独立调试浏览器中，而不是日常使用的另一个浏览器窗口。完成登录后稍候片刻，课程签到模块会自动检测登录状态。
 
 ### 刷课提示“未找到课件学习页”
 
@@ -174,14 +180,15 @@ browser_profile/
 ## 技术架构
 
 ```text
-启动浏览器版.bat
-└─ browser_launcher.py
+dgut-bot.exe（PyInstaller onedir，windowed）
+└─ browser_launcher.py 入口
    ├─ web_server.py / backend_commands.py
    │  ├─ yxy_backend.py       登录、课程与签到
    │  ├─ yxy_course.py        课件状态机与 CDP 控制
    │  ├─ yxy_quiz.py          测验识别与作答
    │  └─ yxy_updater.py       更新检查与移交
-   ├─ React + Vite 前端
+   ├─ React + Vite 前端（web/dist，由本地服务托管）
+   ├─ _internal/updater/updater.exe  独立更新器
    └─ 独立 Chromium browser_profile/
 ```
 
@@ -217,8 +224,16 @@ npm run build
 发布新版本：
 
 1. 同步修改 `version.py` 和 `web/package.json` 中的版本号。
-2. 提交并推送 `v*` tag。
-3. GitHub Actions 构建前端、生成发布 ZIP 与 `manifest.json`，执行更新器冒烟测试并上传 Release。
+2. 提交并推送 `v*` tag；tag 必须与 `version.py` 中的 `APP_VERSION` 一致，否则发布停止。
+3. GitHub Actions 在 windows-latest 上构建前端、运行 Python 与前端测试、用 PyInstaller（固定版本）打包 onedir 发行版、对打包结果执行启动冒烟测试，最后把 `dgut-bot-vX.Y.Z-windows-x64.zip` 与 `manifest.json` 上传到 Release。
+
+本地构建发行版：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build_windows_release.ps1
+```
+
+脚本会清理本项目 `build/`、`dist/` 临时目录，构建前端与 PyInstaller 包，使用 `assets/dgut-bot.ico` 写入程序图标，组装发行目录并生成 ZIP、`manifest.json` 和 SHA-256。
 
 ## 项目文档
 

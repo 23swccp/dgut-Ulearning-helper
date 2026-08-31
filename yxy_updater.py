@@ -10,6 +10,8 @@ import json
 import re
 import shutil
 import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -22,6 +24,7 @@ from urllib.request import Request, urlopen
 
 import requests
 
+from app_paths import is_frozen, resource_root
 from version import APP_VERSION, RELEASE_API
 
 USER_AGENT = "dgut-yxy-assistant-updater"
@@ -612,8 +615,9 @@ class UpdateManager:
             asset = next(item for item in release.get("assets", []) if str(item.get("name", "")).lower() == "manifest.json")
             manifest = parse_manifest(self.transport.get_json(asset["browser_download_url"]))
         except (StopIteration, UpdateError, ValueError, requests.RequestException, OSError, KeyError) as error:
-            # 检查失败时保留此前的 download_failed 状态，避免丢失失败记录。
-            self._set_state(prior_state if prior_state in ("download_failed", "available", "idle") else "idle")
+            # 检查失败时保留此前的 download_failed / available 状态，避免丢失失败记录；
+            # 已下载待安装的包同样必须保留，网络波动不能孤儿化用户的更新。
+            self._set_state(prior_state if prior_state in ("download_failed", "available", "idle", "ready_to_install") else "idle")
             self._mutate(error=f"检查更新失败：{error}")
             self._persist(force=True)
             if manual:
@@ -759,6 +763,29 @@ class UpdateManager:
 
     # ---- 安装移交 ---------------------------------------------------
 
+    def _installer_command(self, workdir: Path) -> list[str]:
+        """独立更新器的启动命令。
+
+        冻结模式不假设系统存在 python.exe/pythonw.exe：把打包在 _internal
+        中的更新器目录（onedir，单进程、无引导父子耦合）整体复制到临时
+        目录后运行——复制是为了避免更新器替换 _internal 时占用自身文件。
+        开发模式把 updater_installer.py 复制到临时目录后用当前解释器运行。
+        """
+        if is_frozen():
+            source = resource_root() / "updater"
+            exe = source / "updater.exe"
+            if not exe.is_file():
+                raise UpdateError("发行包缺少内部更新器（_internal/updater/updater.exe），无法安装更新")
+            target = workdir / "updater"
+            shutil.copytree(source, target)
+            return [str(target / "updater.exe")]
+        installer = workdir / "updater_installer.py"
+        shutil.copyfile(Path(__file__).resolve().parent / "updater_installer.py", installer)
+        python = Path(sys.base_prefix) / "pythonw.exe" if sys.platform == "win32" else Path(sys.executable)
+        if not python.is_file():
+            python = Path(sys.executable)
+        return [str(python), str(installer)]
+
     def install(self) -> dict[str, Any]:
         if self._state_in(*HANDOFF_STATES):
             return {"ok": True, "skipped": True}
@@ -787,28 +814,22 @@ class UpdateManager:
         }
         workdir = Path(tempfile.mkdtemp(prefix="yxy-updater-"))
         try:
-            installer = workdir / "updater_installer.py"
-            shutil.copyfile(Path(__file__).resolve().parent / "updater_installer.py", installer)
             ready_file = workdir / "updater-ready.json"
             progress_file = workdir / "updater-progress.json"
             payload["readyFile"] = str(ready_file)
             payload["progressFile"] = str(progress_file)
             payload["installerLog"] = str(self.update_dir / "updater.log")
             (workdir / "payload.json").write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
-            python = Path(__import__("sys").base_prefix) / "pythonw.exe"
-            if not python.is_file() or __import__("sys").platform != "win32":
-                python = Path(__import__("sys").executable)
-            import subprocess
-
+            command = self._installer_command(workdir)
             process = subprocess.Popen(
-                [str(python), str(installer), "--payload", str(workdir / "payload.json")],
+                [*command, "--payload", str(workdir / "payload.json")],
                 cwd=str(workdir),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
-        except OSError as error:
+        except (OSError, UpdateError) as error:
             self._set_state("ready_to_install")
             self._mutate(error=f"无法启动独立更新器：{error}")
             self._persist(force=True)
@@ -817,8 +838,6 @@ class UpdateManager:
         ready = wait_for_ready(ready_file, timeout=30)
         if ready is None:
             try:
-                import subprocess
-
                 subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False)
             except OSError:
                 pass

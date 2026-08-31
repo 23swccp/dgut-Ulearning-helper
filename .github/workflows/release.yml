@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   build-release:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+    env:
+      PYINSTALLER_VERSION: "6.22.2"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,16 +26,41 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Build frontend
-        working-directory: web
-        run: |
-          npm ci
-          npm run build
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Build and test frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm test -- --run
+          npm run build
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt "pyinstaller==${env:PYINSTALLER_VERSION}"
+
+      - name: Run Python tests
+        run: python -m pytest -q test_backend.py test_course.py test_launcher.py test_quiz.py test_updater.py
+
+      - name: Tag must match version.py
+        shell: pwsh
+        run: |
+          $version = (python -c "from version import APP_VERSION; print(APP_VERSION)").Trim()
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          if ($tag -ne $version) {
+            Write-Error "tag ${{ github.ref_name }} 与 version.py 的版本 $version 不一致；停止发布"
+            exit 1
+          }
+
+      - name: Build internal updater (onefile)
+        run: python -m PyInstaller packaging/updater.spec --noconfirm --distpath dist --workpath build --specpath packaging
+
+      - name: Build onedir release
+        run: python -m PyInstaller packaging/dgut-bot.spec --noconfirm --distpath dist --workpath build --specpath packaging
 
       - name: Package release ZIP and manifest
         env:
@@ -42,14 +69,15 @@ jobs:
         run: python scripts/package_release.py
 
       - name: Smoke test packaged app
+        shell: pwsh
         run: |
-          python -m pip install requests websocket-client
-          python -m unittest test_updater -v
+          $version = (python -c "from version import APP_VERSION; print(APP_VERSION)").Trim()
+          python scripts/smoke_test.py "release/dgut-bot-v$version-windows-x64"
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/*.zip
+            release/dgut-bot-v*-windows-x64.zip
             release/manifest.json
           generate_release_notes: true

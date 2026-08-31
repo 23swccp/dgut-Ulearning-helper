@@ -606,26 +606,32 @@ class SignBackend:
             ws.close()
 
     def load_session_and_courses(self, wait_seconds: int = 20, automatic: bool = False) -> bool:
-        self._log("正在自动检查浏览器登录状态…" if automatic else "正在连接浏览器远程调试端口…", "info")
+        if not automatic:
+            self._log("正在连接浏览器远程调试端口…", "info")
         ws_url = None
-        for _ in range(max(1, wait_seconds)):
+        attempts = max(1, wait_seconds)
+        for attempt in range(attempts):
             ws_url = self._get_ws_url()
             if ws_url:
                 break
-            time.sleep(1)
+            if attempt + 1 < attempts:
+                time.sleep(1)
         if not ws_url:
-            self._log("未发现浏览器远程调试端口。" if automatic else "连接浏览器失败：未发现远程调试端口。", "warn")
+            if not automatic:
+                self._log("连接浏览器失败：未发现远程调试端口。", "warn")
             return False
         try:
             cookies = self._cookies(ws_url)
         except Exception as error:
-            self._log(f"读取浏览器登录信息失败：{error}", "warn")
+            if not automatic:
+                self._log(f"读取浏览器登录信息失败：{error}", "warn")
             return False
         dgut = [item for item in cookies if "dgut.edu.cn" in item.get("domain", "")]
         self.token = next((item.get("value", "") for item in dgut if item.get("name") == "AUTHORIZATION"), "")
         user_id = next((item.get("value") for item in dgut if item.get("name") == "userid"), None)
         if not self.token:
-            self._log("未检测到有效登录状态，请在浏览器中完成优学院登录。", "warn")
+            if not automatic:
+                self._log("未检测到有效登录状态，请在浏览器中完成优学院登录。", "warn")
             return False
         self.headers["Authorization"] = self.token
         self.user_id = int(user_id) if user_id and user_id.isdigit() else None

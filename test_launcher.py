@@ -2,6 +2,7 @@
 
 import json
 import socket
+import sys
 import tempfile
 import threading
 import unittest
@@ -11,11 +12,42 @@ from unittest.mock import patch
 from urllib.request import Request, urlopen
 
 import browser_launcher
-from browser_launcher import choose_frontend_port
+from app_paths import data_root, frontend_dist, is_frozen, resource_root
+from browser_launcher import choose_available_port, choose_frontend_port, service_command
 from web_server import (
     CLIENT_CLOSED_EVENT, LocalApiHandler, SHUTDOWN_EVENT, allowed_cors_origin,
     client_last_seen, reset_client_state,
 )
+
+
+class FrozenPathTests(unittest.TestCase):
+    """冻结（PyInstaller onedir）模式下的服务启动与路径解析。"""
+
+    def test_frozen_service_command_uses_current_executable(self):
+        exe = r"C:\Release\dgut-bot.exe"
+        with patch.object(sys, "frozen", True, create=True), patch.object(sys, "executable", exe):
+            self.assertTrue(is_frozen())
+            self.assertEqual(
+                service_command(8766, use_static=True, api_port=8766),
+                [exe, "--service", "8766", "--api-port", "8766", "--static"],
+            )
+
+    def test_dev_service_command_runs_launcher_script_with_interpreter(self):
+        self.assertFalse(is_frozen())
+        command = service_command(1420, use_static=False, api_port=8766)
+        self.assertEqual(command[2:], ["--service", "1420", "--api-port", "8766"])
+        self.assertNotIn("--static", command)
+        self.assertTrue(Path(command[1]).name == "browser_launcher.py")
+
+    def test_frozen_mode_always_serves_static_frontend(self):
+        with patch.object(sys, "frozen", True, create=True):
+            self.assertTrue(browser_launcher.static_frontend_available())
+
+    def test_frontend_dist_resolves_under_data_root(self):
+        self.assertEqual(frontend_dist(), data_root() / "web" / "dist")
+
+    def test_dev_resource_root_is_source_directory(self):
+        self.assertEqual(resource_root(), Path(browser_launcher.__file__).resolve().parent)
 
 
 class BrowserLauncherTests(unittest.TestCase):
@@ -36,6 +68,7 @@ class BrowserLauncherTests(unittest.TestCase):
     def test_cors_origin_requires_exact_loopback_host_and_allowed_port(self):
         self.assertEqual(allowed_cors_origin("http://localhost:1420"), "http://localhost:1420")
         self.assertEqual(allowed_cors_origin("http://127.0.0.1:8765"), "http://127.0.0.1:8765")
+        self.assertEqual(allowed_cors_origin("http://127.0.0.1:8766"), "http://127.0.0.1:8766")
         self.assertEqual(allowed_cors_origin("http://127.0.0.1.evil.example:1420"), "http://127.0.0.1:1420")
         self.assertEqual(allowed_cors_origin("http://localhost.evil.example:1420"), "http://127.0.0.1:1420")
         self.assertEqual(allowed_cors_origin("http://localhost:9999"), "http://127.0.0.1:1420")
@@ -107,6 +140,14 @@ class BrowserLauncherTests(unittest.TestCase):
             occupied_port = listener.getsockname()[1]
             selected = choose_frontend_port(occupied_port, attempts=20)
         self.assertNotEqual(selected, occupied_port)
+
+    def test_service_port_moves_when_8765_is_busy(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            occupied_port = listener.getsockname()[1]
+            selected = choose_available_port(occupied_port, attempts=20)
+        self.assertNotEqual(selected, occupied_port)
+        self.assertLess(selected, occupied_port + 20)
 
     def test_shutdown_command_sets_launcher_event_after_reply(self):
         SHUTDOWN_EVENT.clear()
