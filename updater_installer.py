@@ -326,7 +326,15 @@ class Installer:
         return self._in_workdir(path)
 
     def _in_workdir(self, path: Path) -> bool:
-        """按当前平台的路径规则判断是否位于更新器工作目录中。"""
+        """按文件系统身份判断是否位于更新器工作目录中。"""
+        # Windows runner 的临时目录可能同时以长路径、8.3 短路径或目录联接出现；
+        # 单纯比较字符串会把同一个目录误判成两个位置。
+        for candidate in (path, *path.parents):
+            try:
+                if os.path.samefile(candidate, self.workdir):
+                    return True
+            except OSError:
+                continue
         candidate = os.path.normcase(os.path.abspath(os.fspath(path)))
         workdir = os.path.normcase(os.path.abspath(os.fspath(self.workdir)))
         try:
