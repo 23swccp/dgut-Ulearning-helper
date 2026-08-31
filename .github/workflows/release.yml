@@ -41,7 +41,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt "pyinstaller==${env:PYINSTALLER_VERSION}"
+          python -m pip install -r requirements.txt pytest "pyinstaller==${env:PYINSTALLER_VERSION}"
 
       - name: Run Python tests
         run: python -m pytest -q test_backend.py test_course.py test_launcher.py test_quiz.py test_updater.py
