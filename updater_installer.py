@@ -323,9 +323,14 @@ class Installer:
         relative = path.relative_to(self.install_dir)
         if is_preserved(relative):
             return True
+        return self._in_workdir(path)
+
+    def _in_workdir(self, path: Path) -> bool:
+        """按当前平台的路径规则判断是否位于更新器工作目录中。"""
+        candidate = os.path.normcase(os.path.abspath(os.fspath(path)))
+        workdir = os.path.normcase(os.path.abspath(os.fspath(self.workdir)))
         try:
-            path.relative_to(self.workdir)
-            return True
+            return os.path.commonpath((candidate, workdir)) == workdir
         except ValueError:
             return False
 
@@ -344,11 +349,8 @@ class Installer:
                 continue
             for name in dirs:
                 candidate = Path(current) / name
-                try:
-                    candidate.relative_to(self.workdir)
+                if self._in_workdir(candidate):
                     continue
-                except ValueError:
-                    pass
                 rel = candidate.relative_to(self.install_dir)
                 if not is_preserved(rel):
                     shutil.rmtree(candidate, ignore_errors=True)

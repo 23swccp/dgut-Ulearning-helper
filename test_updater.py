@@ -3,6 +3,7 @@
 import hashlib
 import io
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -517,6 +518,14 @@ class InstallerLogicTests(unittest.TestCase):
             self.assertEqual((root / "签到记录.md").read_text(encoding="utf-8"), "记录")
             # 旧版本专属文件被移除
             self.assertFalse((root / "web" / "src" / "App.tsx").exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows 路径大小写规则")
+    def test_workdir_detection_is_case_insensitive_on_windows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            installer = self.make_installer(Path(directory))
+            staged = installer.workdir / "staging" / "version.py"
+            differently_cased = Path(str(staged).swapcase())
+            self.assertTrue(installer._in_workdir(differently_cased))
 
     def test_install_failure_rolls_back(self):
         with tempfile.TemporaryDirectory() as directory:
