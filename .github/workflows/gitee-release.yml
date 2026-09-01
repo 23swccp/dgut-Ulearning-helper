@@ -1,0 +1,54 @@
+name: Publish existing release to Gitee
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub release tag to mirror
+        required: true
+        default: v0.3.1
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout publishing script
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install publishing dependency
+        run: python -m pip install "requests>=2.31"
+
+      - name: Download installer from GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          mkdir -p mirror
+          gh release download "$RELEASE_TAG" \
+            --repo "${{ github.repository }}" \
+            --pattern "DgutBot-win-Setup-Qing-Zhi-Xia-Zai-Zhe-Ge.exe" \
+            --dir mirror
+
+      - name: Publish installer to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_OWNER: swccq23
+          GITEE_REPO: dgut-bot
+          GITEE_TAG: ${{ inputs.tag }}
+          GITEE_TARGET_COMMITISH: main
+          GITEE_ASSET: mirror/DgutBot-win-Setup-Qing-Zhi-Xia-Zai-Zhe-Ge.exe
+          GITEE_ASSET_NAME: DgutBot-win-Setup-Qing-Zhi-Xia-Zai-Zhe-Ge.exe
+        run: |
+          if [ -z "$GITEE_TOKEN" ]; then
+            echo "GITEE_TOKEN repository secret is not configured."
+            exit 1
+          fi
+          python scripts/publish_gitee_release.py
