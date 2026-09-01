@@ -95,7 +95,9 @@ jobs:
 
           其余文件由应用内自动更新使用，请勿手动下载。
 
-          如果 GitHub 页面或文件下载失败，请开启支持 GitHub 的网络加速器后重试。
+          如果 GitHub 页面或文件下载失败，可前往 [Gitee 备用下载](https://gitee.com/swccq23/dgut-bot/releases/tag/${{ github.ref_name }}) 获取同一安装器。
+
+          应用内更新源仍是 GitHub；应用内更新失败时，请开启支持 GitHub 的网络加速器后重试。
           "@ | Set-Content -LiteralPath release-download-note.md -Encoding utf8
           gh release edit "${{ github.ref_name }}" --notes-file release-download-note.md
 

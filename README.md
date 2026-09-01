@@ -31,7 +31,7 @@
 2. 运行安装器；Velopack 会安装到当前用户的 LocalAppData，并创建稳定的桌面和开始菜单快捷方式。
 3. 此后始终从快捷方式启动，不要继续运行旧版 ZIP 文件夹中的 `dgut-bot.exe`。
 
-如果 GitHub 页面或安装器下载失败，请先开启支持 GitHub 的网络加速器，再刷新页面重试。应用内检查或下载更新失败时也按相同方式处理，不会影响当前版本继续使用。
+如果 GitHub 页面或安装器下载失败，可前往 [Gitee 备用下载](https://gitee.com/swccq23/dgut-bot/releases) 获取同一安装器。应用内更新源仍是 GitHub；应用内检查或下载更新失败时，请开启支持 GitHub 的网络加速器后重试，不会影响当前版本继续使用。
 
 不需要安装 Python，不需要安装 Node.js，也不需要执行 `pip install`。程序会优先使用设置中保存的浏览器，然后依次检测 Edge、Chrome 和其他 Chromium 浏览器。
 
