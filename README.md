@@ -216,9 +216,12 @@ npm run build
 
 发布新版本：
 
-1. 同步修改 `version.py` 和 `web/package.json` 中的版本号。
-2. 提交并推送 `v*` tag；tag 必须与 `version.py` 中的 `APP_VERSION` 一致，否则发布停止。
-3. GitHub Actions 构建并测试前端与 Python，用 PyInstaller 生成 onedir，再由 Velopack `vpk` 生成并发布 `Setup.exe`、完整/增量更新包和更新索引；不生成容易让普通用户误选的 Portable.zip。
+1. 同步修改 `version.py`、前端包版本和关于页版本徽章。
+2. 完成完整测试与前端构建后，提交并推送 `main`。
+3. 创建并推送与 `APP_VERSION` 一致的 `v*` tag；GitHub Actions 会构建 GitHub Release、同步源码/标签到 Gitee，并把用户安装器上传到 Gitee Release。
+4. 不要替换已发布版本的安装器；程序内文件发生变化时发布新的补丁版本。
+
+完整的版本位置、双仓库分工、令牌规则、发布命令和验收清单见 [发布与更新维护](发布与更新维护.md)。
 
 本地构建发行版：
 
@@ -232,6 +235,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build_windows_release.ps1
 
 - [完整功能列表](功能列表.md)
 - [开发与维护交接文档](交接文档.md)
+- [发布、自动更新与 Gitee 镜像维护](发布与更新维护.md)
 - [测验页面结构调研](测验页面结构调研.md)
 - [本地测验模拟环境](quiz_simulator/README.md)
 
