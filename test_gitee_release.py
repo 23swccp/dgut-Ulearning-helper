@@ -76,6 +76,31 @@ def test_creates_release_and_uploads_installer(tmp_path):
     assert upload[0] == DEFAULT_ASSET_NAME
 
 
+def test_creates_release_when_gitee_returns_null_for_missing_tag(tmp_path):
+    asset = tmp_path / "Setup.exe"
+    asset.write_bytes(b"installer")
+    session = FakeSession(
+        [
+            FakeResponse(200, None, "null"),
+            FakeResponse(201, {"id": 12}),
+            FakeResponse(200, []),
+            FakeResponse(201, {}),
+        ]
+    )
+
+    publish_release(
+        token="secret",
+        owner="owner",
+        repo="repo",
+        tag="v1.0.0",
+        target="main",
+        asset=asset,
+        session=session,
+    )
+
+    assert [call[0] for call in session.calls] == ["GET", "POST", "GET", "POST"]
+
+
 def test_replaces_same_named_attachment(tmp_path):
     asset = tmp_path / "Setup.exe"
     asset.write_bytes(b"new installer")

@@ -65,7 +65,9 @@ def publish_release(
     tag_url = f"{releases_url}/tags/{tag}"
 
     response = client.get(tag_url, timeout=30)
-    if response.status_code == 404:
+    release = None if response.status_code == 404 else _json(response, "find release")
+    # Gitee currently answers HTTP 200 with a JSON null for an unknown tag.
+    if release is None:
         release = _json(
             client.post(
                 releases_url,
@@ -86,7 +88,6 @@ def publish_release(
         )
         print(f"Created Gitee Release {tag}.")
     else:
-        release = _json(response, "find release")
         print(f"Using existing Gitee Release {tag}.")
 
     release_id = release.get("id")
