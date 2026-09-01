@@ -261,7 +261,7 @@ python quiz_simulator.py --show --hold 30
 | 签到请求失败 | 界面事件与 `签到记录.md` |
 | 页面结构识别失败 | 浏览器开发者工具、`quiz_probe.py` |
 | 自动答题回归 | `quiz_simulator.py` 与 `test_quiz.py` |
-| 更新失败 | `browser-service.log`、应用内消息和 GitHub Release 资产 |
+| 更新失败 | 先开启支持 GitHub 的网络加速器后重试；仍失败再检查 `browser-service.log` 和应用内消息 |
 
 平台页面升级后，CSS 选择器和页面结构可能发生变化。修改识别逻辑时，应保留无法识别就跳过的安全行为，不要使用随机点击作为兜底。
 

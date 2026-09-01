@@ -117,6 +117,7 @@ class VelopackAdapterTests(unittest.TestCase):
             manager.check()
             snapshot = wait_state(manager, "download_failed")
             self.assertIn("network down", snapshot["error"])
+            self.assertIn("网络加速器", snapshot["error"])
             self.assertTrue(snapshot["canRetryDownload"])
             fake.download_error = None
             manager.start_download()
@@ -130,6 +131,7 @@ class VelopackAdapterTests(unittest.TestCase):
             result = manager.check()
             self.assertFalse(result["ok"])
             self.assertEqual(manager.snapshot()["state"], "idle")
+            self.assertIn("网络加速器", manager.snapshot()["error"])
             self.assertFalse(manager.snapshot()["canInstall"])
 
     def test_shutdown_waits_for_sdk_handoff_and_closes_browser_last(self):

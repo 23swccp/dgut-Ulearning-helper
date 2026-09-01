@@ -17,6 +17,9 @@ import requests
 import velopack
 
 
+GITHUB_NETWORK_HINT = "请开启支持 GitHub 的网络加速器后重试。"
+
+
 def select_targets_to_close(targets: list[dict[str, Any]], base_url: str) -> list[dict[str, Any]]:
     """只选择与助手本地地址精确同源的 Chromium 页面。"""
     expected = urlparse(base_url)
@@ -219,9 +222,10 @@ class UpdateManager:
             update = None if pending is not None else manager.check_for_updates()
         except Exception as error:
             message = str(error) or error.__class__.__name__
-            self._set("idle", error=f"检查更新失败：{message}")
+            display = f"{message}；{GITHUB_NETWORK_HINT}"
+            self._set("idle", error=f"检查更新失败：{display}")
             if manual:
-                self._add_message("error", "检查更新失败", message)
+                self._add_message("error", "检查更新失败", display)
             return {"ok": False, "error": message}
         if pending is not None:
             self._pending = pending
@@ -279,8 +283,9 @@ class UpdateManager:
             self._get_manager().download_updates(update, progress)
         except Exception as error:
             message = str(error) or error.__class__.__name__
-            self._add_message("error", f"⚠ v{self._state['latestVersion']} 下载失败", message)
-            self._set("download_failed", error=message)
+            display = f"{message}；{GITHUB_NETWORK_HINT}"
+            self._add_message("error", f"⚠ v{self._state['latestVersion']} 下载失败", display)
+            self._set("download_failed", error=display)
             return
         self._add_message("success", f"✓ v{self._state['latestVersion']} 已由 Velopack 下载并校验", "可以随时安装。")
         self._set("ready_to_install", downloaded=total, total=total, percent=100, error="")
