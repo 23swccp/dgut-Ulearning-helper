@@ -120,6 +120,12 @@ Vite 会自动代理到实际选中的空闲后端端口。
 
 签到日志会自动隐藏常见的 `Token`、`Authorization`、`Password`、`Cookie` 和 `Bearer` 凭据。
 
+## 更新
+
+小皮卡启动时会调用 Velopack 检查更新，更新源为 GitHub。若更新失败或速度较慢，请开启 VPN 或 GitHub 加速器，如 Steam++（Watt Toolkit）、FastGitHub、UU 加速器等。
+
+若要把小皮卡推荐给亲朋好友，请前往 [Gitee 码云下载页面](https://gitee.com/swccq23/dgut-bot/releases) 获取安装器。
+
 
 ---
 
