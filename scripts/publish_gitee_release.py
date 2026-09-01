@@ -69,7 +69,7 @@ def publish_release(
         release = _json(
             client.post(
                 releases_url,
-                json={
+                data={
                     "tag_name": tag,
                     "target_commitish": target,
                     "name": tag,
