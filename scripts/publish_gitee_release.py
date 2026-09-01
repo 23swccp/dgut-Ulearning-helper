@@ -121,7 +121,9 @@ def publish_release(
                         "application/vnd.microsoft.portable-executable",
                     )
                 },
-                timeout=300,
+                # GitHub-hosted runners can upload to Gitee very slowly even
+                # for a modest installer, so allow a long socket write window.
+                timeout=1200,
             ),
             "upload installer",
         )
