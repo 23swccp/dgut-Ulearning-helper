@@ -51,7 +51,7 @@ jobs:
           python -m pip install -r requirements.txt pytest "pyinstaller==${env:PYINSTALLER_VERSION}"
 
       - name: Run Python tests
-        run: python -m pytest -q test_backend.py test_course.py test_launcher.py test_quiz.py test_updater.py
+        run: python -m pytest -q test_backend.py test_course.py test_launcher.py test_quiz.py test_updater.py test_gitee_release.py
 
       - name: Tag must match version.py
         shell: pwsh
@@ -98,3 +98,14 @@ jobs:
           如果 GitHub 页面或文件下载失败，请开启支持 GitHub 的网络加速器后重试。
           "@ | Set-Content -LiteralPath release-download-note.md -Encoding utf8
           gh release edit "${{ github.ref_name }}" --notes-file release-download-note.md
+
+      - name: Publish installer to Gitee mirror
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_OWNER: swccq23
+          GITEE_REPO: dgut-bot
+          GITEE_TAG: ${{ github.ref_name }}
+          GITEE_TARGET_COMMITISH: main
+          GITEE_ASSET: Releases/DgutBot-win-Setup.exe
+          GITEE_ASSET_NAME: DgutBot-win-Setup-Qing-Zhi-Xia-Zai-Zhe-Ge.exe
+        run: python scripts/publish_gitee_release.py

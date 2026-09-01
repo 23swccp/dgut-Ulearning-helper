@@ -29,7 +29,7 @@ try {
 
 python -m pip install -r requirements.txt "pyinstaller==6.22.2"
 if ($LASTEXITCODE -ne 0) { throw "dependency installation failed" }
-python -m pytest -q test_backend.py test_course.py test_launcher.py test_quiz.py test_updater.py
+python -m pytest -q test_backend.py test_course.py test_launcher.py test_quiz.py test_updater.py test_gitee_release.py
 if ($LASTEXITCODE -ne 0) { throw "python tests failed" }
 python -m PyInstaller packaging/dgut-bot.spec --noconfirm --distpath dist --workpath build
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
