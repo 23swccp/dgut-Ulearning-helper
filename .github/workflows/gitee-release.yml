@@ -40,6 +40,7 @@ jobs:
       - name: Publish installer to Gitee
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_UPLOAD_TRANSPORT: curl
           GITEE_OWNER: swccq23
           GITEE_REPO: dgut-bot
           GITEE_TAG: ${{ inputs.tag }}

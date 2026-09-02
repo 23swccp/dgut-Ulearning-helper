@@ -7,6 +7,9 @@ local builds do not fail merely because they cannot publish a mirror release.
 from __future__ import annotations
 
 import argparse
+import json
+import subprocess
+import tempfile
 import os
 from pathlib import Path
 from typing import Any
@@ -34,6 +37,32 @@ def _json(response: requests.Response, action: str) -> Any:
         return response.json()
     except ValueError as exc:
         raise GiteeReleaseError(f"Gitee API {action} returned invalid JSON") from exc
+
+
+
+def _curl_upload(url: str, token: str, asset: Path, asset_name: str) -> Any:
+    """Stream the unchanged installer; keep authorization off argv and disk."""
+    if any(char in token for char in "\r\n"):
+        raise GiteeReleaseError("Invalid credential format")
+    escaped = token.replace("\\", "\\\\").replace('"', '\\"')
+    config = f'header = "Authorization: Bearer {escaped}"\n'
+    with tempfile.TemporaryDirectory(prefix="gitee-upload-") as directory:
+        body = Path(directory) / "response.json"
+        print(f"Uploading {asset.stat().st_size} bytes with curl (180-second total limit).", flush=True)
+        result = subprocess.run([
+            "curl", "-q", "--config", "-", "--http1.1", "--silent", "--show-error",
+            "--fail-with-body", "--header", "Expect: 100-continue", "--expect100-timeout", "10",
+            "--connect-timeout", "20", "--max-time", "180", "--speed-limit", "1024", "--speed-time", "45",
+            "--header", "Accept: application/json", "--user-agent", "dgut-bot-release-workflow",
+            "--form", f"file=@{asset.resolve()};filename={asset_name};type=application/vnd.microsoft.portable-executable",
+            "--output", str(body), "--write-out", "HTTP %{http_code}; uploaded %{size_upload} bytes; speed %{speed_upload} B/s\n", url,
+        ], input=config, text=True, capture_output=True, check=False)
+        print(result.stdout, flush=True)
+        text = body.read_text(encoding="utf-8") if body.exists() else ""
+        if result.returncode:
+            detail = (result.stderr + "\n" + text).replace(token, "[REDACTED]")[:1500]
+            raise GiteeReleaseError(f"curl upload failed ({result.returncode}): {detail}")
+        return json.loads(text)
 
 
 def publish_release(
@@ -110,23 +139,26 @@ def publish_release(
             )
             print(f"Removed old attachment {asset_name}.")
 
-    with asset.open("rb") as installer:
-        uploaded = _json(
-            client.post(
-                attachments_url,
-                files={
-                    "file": (
-                        asset_name,
-                        installer,
-                        "application/vnd.microsoft.portable-executable",
-                    )
-                },
-                # GitHub-hosted runners can upload to Gitee very slowly even
-                # for a modest installer, so allow a long socket write window.
-                timeout=1200,
-            ),
-            "upload installer",
-        )
+    if os.getenv("GITEE_UPLOAD_TRANSPORT") == "curl":
+        uploaded = _curl_upload(attachments_url, token, asset, asset_name)
+    else:
+        with asset.open("rb") as installer:
+            uploaded = _json(
+                client.post(
+                    attachments_url,
+                    files={
+                        "file": (
+                            asset_name,
+                            installer,
+                            "application/vnd.microsoft.portable-executable",
+                        )
+                    },
+                    # GitHub-hosted runners can upload to Gitee very slowly even
+                    # for a modest installer, so allow a long socket write window.
+                    timeout=1200,
+                ),
+                "upload installer",
+            )
 
     download_url = uploaded.get("browser_download_url") or uploaded.get("download_url") or ""
     print(f"Uploaded {asset_name} to Gitee Release {tag}.")
