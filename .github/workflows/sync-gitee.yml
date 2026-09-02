@@ -31,6 +31,9 @@ jobs:
             echo "GITEE_TOKEN repository secret is not configured."
             exit 1
           fi
+          # checkout may replace the triggering annotated tag with its commit.
+          # Restore tag objects so --follow-tags includes the release tag.
+          git fetch origin '+refs/tags/*:refs/tags/*'
           git push \
             "https://${GITEE_USERNAME}:${GITEE_TOKEN}@gitee.com/${GITEE_OWNER}/${GITEE_REPO}.git" \
             HEAD:main \

@@ -17,7 +17,7 @@ from app_paths import data_root, resource_root
 
 
 APP_NAME = "优学院助手"
-APP_VERSION = "0.3.3"
+APP_VERSION = "0.3.4"
 ROOT = Path(__file__).resolve().parent
 
 

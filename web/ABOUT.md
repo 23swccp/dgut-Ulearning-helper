@@ -4,7 +4,7 @@
 
 莞工小皮卡
 
-[![Python 3.10+](/docs/badges/python.svg)](https://www.python.org/) [![Windows](/docs/badges/windows.svg)](https://www.microsoft.com/windows/) [![v0.3.3](/docs/badges/version.svg)]({{REPO_URL}}/releases) [![GitHub dgut-bot](/docs/badges/github.svg)]({{REPO_URL}})
+[![Python 3.10+](/docs/badges/python.svg)](https://www.python.org/) [![Windows](/docs/badges/windows.svg)](https://www.microsoft.com/windows/) [![v0.3.4](/docs/badges/version.svg)]({{REPO_URL}}/releases) [![GitHub dgut-bot](/docs/badges/github.svg)]({{REPO_URL}})
 
 **莞工小皮卡**是一款主要由 `Python` 编写的优学院辅助程序，能够自动处理课程签到和课件学习任务。
 仅支持 Windows 系统。

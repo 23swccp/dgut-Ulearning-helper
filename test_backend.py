@@ -247,7 +247,7 @@ class BackendTests(unittest.TestCase):
             backend.config.browser_name = "自定义浏览器"
             backend.config.browser_path = str(custom)
             path, name = backend.find_browser()
-            self.assertEqual((path, name), (str(custom), "自定义浏览器"))
+            self.assertEqual((path, name), (str(custom.resolve()), "自定义浏览器"))
 
     def test_copied_browser_path_survives_save_restart_and_launch(self):
         with tempfile.TemporaryDirectory() as directory:
