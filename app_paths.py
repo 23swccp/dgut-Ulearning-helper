@@ -39,3 +39,15 @@ def data_root() -> Path:
 def frontend_dist() -> Path:
     """前端是随版本替换的只读资源，始终从 PyInstaller 资源目录读取。"""
     return resource_root() / "web" / "dist"
+
+
+def agent_runtime_root() -> Path:
+    """Keep discovery credentials out of the source tree even in development.
+
+    Installed mode equals data_root(); YXY_DATA_DIR still isolates tests.
+    """
+    if os.environ.get("YXY_DATA_DIR", "").strip() or is_frozen():
+        return data_root()
+    local = os.environ.get("LOCALAPPDATA", "").strip()
+    base = Path(local) if local else Path.home() / "AppData" / "Local"
+    return (base / "DgutBot" / "data").resolve()

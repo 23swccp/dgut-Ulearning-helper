@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from contextlib import ExitStack
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -58,6 +59,102 @@ class FrozenPathTests(unittest.TestCase):
 
 
 class BrowserLauncherTests(unittest.TestCase):
+    def frozen_launch_mocks(self, stack):
+        stack.enter_context(patch.object(sys, "argv", ["dgut-bot.exe"]))
+        stack.enter_context(patch("browser_launcher.is_frozen", return_value=True))
+        stack.enter_context(patch("browser_launcher.prepare_launcher_console"))
+        stack.enter_context(patch("browser_launcher.app_mutex_exists", return_value=False))
+        stack.enter_context(patch("browser_launcher.choose_available_port", return_value=8765))
+        stack.enter_context(patch("browser_launcher.wait_for_frontend"))
+        service = stack.enter_context(patch("browser_launcher.start_background_service"))
+        browser = stack.enter_context(patch("browser_launcher.backend.start_browser", return_value=True))
+        default = stack.enter_context(patch("browser_launcher.os.startfile", create=True))
+        return service, browser, default
+
+    def test_frozen_missing_browser_cancels_without_starting_web_or_default_browser(self):
+        with ExitStack() as stack:
+            service, browser, default = self.frozen_launch_mocks(stack)
+            stack.enter_context(patch("browser_launcher.backend.find_browser", return_value=(None, None)))
+            stack.enter_context(patch("builtins.input", side_effect=EOFError))
+            self.assertEqual(browser_launcher.main(), 0)
+            service.assert_not_called()
+            browser.assert_not_called()
+            default.assert_not_called()
+
+    def test_frozen_manual_setup_finishes_before_web_service_starts(self):
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            service, browser, default = self.frozen_launch_mocks(stack)
+            stack.enter_context(patch("browser_launcher.backend.find_browser", return_value=(None, None)))
+            saved = stack.enter_context(patch("browser_launcher.backend.update_settings"))
+            executable = Path(directory) / "msedge.exe"
+            executable.touch()
+            values = iter([str(Path(directory) / "missing.exe"), f'"{executable}"'])
+
+            def read_path(_prompt):
+                service.assert_not_called()
+                browser.assert_not_called()
+                return next(values)
+
+            stack.enter_context(patch("builtins.input", side_effect=read_path))
+            self.assertEqual(browser_launcher.main(), 0)
+            saved.assert_called_once_with(browser_name="Microsoft Edge", browser_path=str(executable.resolve()))
+            service.assert_called_once_with(8765, True, 8765)
+            browser.assert_called_once_with("http://127.0.0.1:8765")
+            default.assert_not_called()
+
+    def test_frozen_detected_browser_skips_manual_setup(self):
+        with ExitStack() as stack:
+            service, browser, default = self.frozen_launch_mocks(stack)
+            stack.enter_context(patch("browser_launcher.open_frontend", return_value="debug"))
+            prompt = stack.enter_context(patch("browser_launcher.prompt_for_browser"))
+            self.assertEqual(browser_launcher.main(), 0)
+            prompt.assert_not_called()
+            service.assert_called_once_with(8765, True, 8765)
+            browser.assert_called_once()
+            default.assert_not_called()
+
+    def test_background_service_does_not_create_interactive_console(self):
+        with (
+            patch.object(sys, "argv", ["dgut-bot.exe", "--service", "8765", "--static"]),
+            patch("browser_launcher.prepare_launcher_console") as console,
+            patch("browser_launcher.run_background_service", return_value=0) as service,
+        ):
+            self.assertEqual(browser_launcher.main(), 0)
+            console.assert_not_called()
+            service.assert_called_once_with(8765, True, 8765)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows console")
+    def test_terminal_encoding_supports_utf8_and_gbk_fallback(self):
+        for ready, expected in ((True, "utf-8"), (False, "gbk")):
+            with (
+                self.subTest(encoding=expected),
+                patch.dict(os.environ, {"YXY_CONSOLE_ENCODING": "utf-8"}),
+                patch("ctypes.windll.kernel32") as kernel,
+                patch.object(sys, "stdin") as stdin,
+                patch.object(sys, "stdout") as stdout,
+            ):
+                kernel.SetConsoleOutputCP.return_value = ready
+                kernel.SetConsoleCP.return_value = ready
+                self.assertEqual(browser_launcher.configure_console_encoding(), expected)
+                stdin.reconfigure.assert_called_once_with(encoding=expected, errors="replace")
+                stdout.reconfigure.assert_called_once_with(encoding=expected, errors="replace")
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows console")
+    def test_windowed_launcher_allocates_console_and_binds_input_output(self):
+        with (
+            patch("browser_launcher.is_frozen", return_value=True),
+            patch("ctypes.windll.kernel32") as kernel,
+            patch("builtins.open") as opened,
+            patch.object(sys, "stdin"), patch.object(sys, "stdout"), patch.object(sys, "stderr"),
+            patch("browser_launcher.configure_console_encoding") as encoding,
+        ):
+            kernel.GetConsoleWindow.return_value = 0
+            kernel.AllocConsole.return_value = 1
+            browser_launcher.prepare_launcher_console()
+            kernel.AllocConsole.assert_called_once()
+            self.assertEqual([call.args[0] for call in opened.call_args_list], ["CONIN$", "CONOUT$", "CONOUT$"])
+            encoding.assert_called_once()
+
     def test_missing_heartbeat_stops_service_after_background_grace_period(self):
         self.assertFalse(browser_launcher.client_connection_expired(False, 0, now=100))
         timeout = browser_launcher.CLIENT_HEARTBEAT_TIMEOUT

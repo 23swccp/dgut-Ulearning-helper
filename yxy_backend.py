@@ -23,6 +23,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from websocket import create_connection
 
+from browser_paths import extra_browser_candidates, normalize_browser_path, resolve_browser_path
+
 
 LMS_BASE = "https://lms.dgut.edu.cn/courseapi"
 APP_BASE = "https://application.dgut.edu.cn/classroomapi"
@@ -105,6 +107,7 @@ class AppConfig:
             merged["course_quiz_auto_answer"] = False
         for key in ("browser_path", "browser_name", "log_path", "address"):
             merged[key] = str(merged[key] if merged[key] is not None else getattr(defaults, key))
+        merged["browser_path"] = normalize_browser_path(merged["browser_path"])
         return cls(**merged)
 
     def to_mapping(self) -> dict:
@@ -228,6 +231,10 @@ class SignBackend:
             self.headers["Authorization"] = self.token
         self.api = ApiClient(self.headers)
         self._course_controller = None
+        self._course_operation_lock = threading.RLock()
+        self._course_reservation_lock = threading.Lock()
+        self._course_reservation = None
+        self._course_starting = False
 
     def _load_config(self) -> AppConfig:
         values: dict = {}
@@ -298,6 +305,15 @@ class SignBackend:
         self._write_json_atomic(self.config_path, self.config.to_mapping())
 
     def update_settings(self, **values) -> None:
+        if "browser_path" in values:
+            path = normalize_browser_path(str(values["browser_path"] or ""))
+            if path:
+                resolved = resolve_browser_path(path)
+                if not resolved:
+                    raise ValueError(f"浏览器路径无效：{path}。请选择 msedge.exe、chrome.exe 等浏览器程序，或其所在文件夹。")
+                values["browser_path"] = resolved
+            else:
+                values["browser_path"] = ""
         self.config = AppConfig.from_mapping(self.config.to_mapping() | values, self.root)
         self.save_config()
 
@@ -353,25 +369,55 @@ class SignBackend:
             )
         return self._course_controller
 
-    def start_course_helper(self) -> bool:
+    def reserve_course_start(self, task_id: str) -> bool:
+        with self._course_reservation_lock:
+            if self._course_reservation or self._course_starting or (self._course_controller and self._course_controller._running):
+                return False
+            self._course_reservation = task_id
+            return True
+
+    def release_course_start(self, task_id: str) -> None:
+        with self._course_reservation_lock:
+            if self._course_reservation == task_id:
+                self._course_reservation = None
+
+    def start_course_helper(self, *, rate=None, quiz_mode=None, agent_provider=None, task_id=None) -> bool:
+        with self._course_operation_lock:
+            with self._course_reservation_lock:
+                if self._course_reservation and self._course_reservation != task_id:
+                    return False
+                self._course_starting = True
+            try:
+                return self._start_course_helper(rate=rate, quiz_mode=quiz_mode, agent_provider=agent_provider)
+            finally:
+                with self._course_reservation_lock:
+                    self._course_starting = False
+
+    def _start_course_helper(self, *, rate=None, quiz_mode=None, agent_provider=None) -> bool:
         """启动课件学习辅助；需用户先在调试浏览器打开课件学习页。"""
         from yxy_course import CourseConfig
         config = CourseConfig(
-            playback_rate=float(self.config.course_playback_rate),
+            playback_rate=float(self.config.course_playback_rate if rate is None else rate),
             auto_dismiss_dialog=bool(self.config.course_auto_dismiss_dialog),
             document_scroll_enabled=bool(self.config.course_document_scroll_enabled),
             document_scroll_interval=float(self.config.course_document_scroll_interval),
             document_scroll_speed=float(self.config.course_document_scroll_speed),
-            quiz_auto_answer=bool(self.config.course_quiz_auto_answer),
+            quiz_auto_answer=bool(self.config.course_quiz_auto_answer) if quiz_mode is None else quiz_mode != "disabled",
+            quiz_mode=quiz_mode or "fixed",
             quiz_choice_enabled=bool(self.config.course_quiz_choice_enabled),
             quiz_judgment_enabled=bool(self.config.course_quiz_judgment_enabled),
             quiz_blank_enabled=bool(self.config.course_quiz_blank_enabled),
         )
-        return self.course_controller.start(config)
+        controller = self.course_controller
+        if controller._running:
+            return False
+        controller._agent_answer_provider = agent_provider
+        return controller.start(config)
 
     def stop_course_helper(self) -> None:
         """停止课程页控制器，不关闭用户的浏览器标签页。"""
-        self.course_controller.stop()
+        with self._course_operation_lock:
+            self.course_controller.stop()
 
     def set_course_speed(self, rate: float) -> None:
         """在运行中调整视频播放倍速。"""
@@ -477,7 +523,7 @@ class SignBackend:
 
     def browser_candidates(self) -> list[tuple[str, list[str]]]:
         """返回按推荐顺序排列的 Chromium 浏览器常见安装位置。"""
-        return [
+        candidates = [
             ("Microsoft Edge", [os.path.expandvars(r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe"), os.path.expandvars(r"%PROGRAMFILES%\Microsoft\Edge\Application\msedge.exe"), os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"), r"D:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", r"D:\Program Files\Microsoft\Edge\Application\msedge.exe"]),
             ("Google Chrome", [os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"), os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"), os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe"), r"D:\Program Files\Google\Chrome\Application\chrome.exe", r"D:\Program Files (x86)\Google\Chrome\Application\chrome.exe"]),
             ("Brave", [os.path.expandvars(r"%PROGRAMFILES%\BraveSoftware\Brave-Browser\Application\brave.exe"), os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe"), r"D:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"]),
@@ -486,6 +532,8 @@ class SignBackend:
             ("Chromium", [os.path.expandvars(r"%LOCALAPPDATA%\Chromium\Application\chrome.exe"), os.path.expandvars(r"%PROGRAMFILES%\Chromium\Application\chrome.exe")]),
             ("360 极速浏览器", [os.path.expandvars(r"%PROGRAMFILES(X86)%\360ChromeX\Chrome\Application\360ChromeX.exe"), os.path.expandvars(r"%LOCALAPPDATA%\360ChromeX\Chrome\Application\360ChromeX.exe"), r"D:\Program Files (x86)\360ChromeX\Chrome\Application\360ChromeX.exe"]),
         ]
+        extra = extra_browser_candidates()
+        return [(name, paths + extra.get(name, [])) for name, paths in candidates]
 
     def detect_browsers(self, timeout_seconds: float = 10.0) -> list[dict[str, str]]:
         """扫描并返回全部已安装的 Chromium 浏览器，而不是只取第一个。"""
@@ -513,11 +561,13 @@ class SignBackend:
         """按 Edge、Chrome、其他 Chromium 的顺序检查常见安装位置。"""
         report = progress or (lambda _text: None)
         deadline = time.monotonic() + max(0.1, timeout_seconds)
-        manual = self.config.browser_path
+        manual = resolve_browser_path(self.config.browser_path)
         # 网页设置已将浏览器名称与精确路径成对保存；选中的路径优先。
-        if manual and Path(manual).is_file():
+        if manual:
             report(str(Path(manual)))
             return manual, self.config.browser_name or Path(manual).stem
+        if self.config.browser_path:
+            report(f"已保存的浏览器路径无效：{self.config.browser_path}；正在重新检测。")
         checked: set[str] = set()
         for name, paths in self.browser_candidates():
             for path in paths:
@@ -661,6 +711,12 @@ class SignBackend:
 
     def clear_selected_course(self) -> None:
         self.selected_course = None
+
+    def select_course_id(self, course_id: str) -> Course | None:
+        course = next((item for item in self.courses if str(item.id) == course_id), None)
+        if course is not None:
+            self.selected_course = course
+        return course
 
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
         return self.api.request(method, url, **kwargs)

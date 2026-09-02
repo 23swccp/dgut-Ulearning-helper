@@ -8,6 +8,9 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
+from agent_protocol import AgentError
+from agent_tools import build_registry
+from agent_service import AgentService
 from app_paths import data_root
 from yxy_backend import SignBackend
 from velopack_updater import UpdateManager
@@ -23,6 +26,8 @@ class EventBuffer:
     def __init__(self, maxlen: int = 1500) -> None:
         self._events: deque[dict[str, Any]] = deque(maxlen=maxlen)
         self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
+        self._listeners = []
         self._seq = 0
         self._default_session_id = f"app-{datetime.now().astimezone():%Y%m%d}-{uuid4().hex[:8]}"
 
@@ -51,7 +56,42 @@ class EventBuffer:
                 "data": dict(data or {}),
             }
             self._events.append(event)
-            return dict(event)
+            self._condition.notify_all()
+            listeners = list(self._listeners)
+        for listener in listeners:
+            try:
+                listener(dict(event))
+            except Exception:
+                pass
+        return dict(event)
+
+    def subscribe(self, listener) -> None:
+        with self._lock:
+            self._listeners.append(listener)
+
+    def wait_events(self, after_seq: int, timeout_ms: int, limit: int, categories: list[str]) -> dict[str, Any]:
+        def matching():
+            return [event for event in self._events if event["seq"] > after_seq
+                    and event["code"] not in {"DEBUG_LOG", "LEGACY_LOG"}
+                    and (not categories or event["category"] in categories)]
+        with self._condition:
+            found = self._condition.wait_for(lambda: bool(matching()), timeout=timeout_ms / 1000)
+            events = matching()[:limit]
+            dropped = max(0, self._events[0]["seq"] - 1) if self._events else 0
+            latest = events[-1]["seq"] if len(events) == limit else self._seq
+            # Explicit allowlist: raw diagnostic messages/data never cross the Agent boundary.
+            safe = []
+            for event in events:
+                page = event["page"]
+                allowed_data = {"requestId", "questionCount", "count", "playbackRate", "completed", "skipped", "failed", "elapsedSeconds"}
+                safe.append({
+                    "seq": event["seq"], "time": event["time"], "sessionId": event["sessionId"],
+                    "code": event["code"], "level": event["level"], "category": event["category"],
+                    "message": event["code"],
+                    "page": {k: page[k] for k in ("id", "name", "index", "total") if k in page},
+                    "data": {k: v for k, v in event["data"].items() if k in allowed_data and isinstance(v, (str, int, float, bool))},
+                })
+            return {"events": safe, "nextSeq": latest, "timedOut": not found, "droppedBeforeSeq": dropped}
 
     def get_events(self, after_seq: int = 0) -> dict[str, Any]:
         with self._lock:
@@ -91,6 +131,29 @@ update_manager = UpdateManager(
     debug_port=lambda: backend.config.debug_port,
 )
 update_manager.restore()
+
+
+AGENT_INSTANCE_ID = ""
+AGENT_SERVICE = AgentService(backend, EVENT_BUFFER)
+AGENT_REGISTRY = build_registry(backend, instance_id=AGENT_INSTANCE_ID, services=AGENT_SERVICE)
+
+
+def configure_agent_registry(instance_id: str) -> None:
+    """Bind capability metadata to the service instance published by the launcher."""
+    global AGENT_INSTANCE_ID, AGENT_REGISTRY
+    AGENT_INSTANCE_ID = str(instance_id)
+    AGENT_REGISTRY = build_registry(backend, instance_id=AGENT_INSTANCE_ID, services=AGENT_SERVICE)
+
+
+def agent_capabilities() -> dict[str, Any]:
+    return {"schemaVersion": 1, "tools": AGENT_REGISTRY.capabilities()}
+
+
+def handle_agent(tool: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Dispatch an authenticated Agent request without exposing backend internals."""
+    if not isinstance(payload, dict):
+        raise AgentError("TOOL_INPUT_INVALID", "Tool input must be a JSON object.")
+    return AGENT_REGISTRY.call(tool, payload)
 
 
 def courses() -> list[dict[str, Any]]:
@@ -169,7 +232,10 @@ def handle(command: str, payload: dict[str, Any]) -> dict[str, Any]:
         )
         return {"ok": ok, "account": backend.account_login_status()}
     if command == "update_settings":
-        backend.update_settings(**payload)
+        try:
+            backend.update_settings(**payload)
+        except ValueError as error:
+            return {"ok": False, "error": str(error)}
         return {"ok": True, "config": backend.config.to_mapping()}
     if command == "open_log":
         try:
@@ -178,7 +244,8 @@ def handle(command: str, payload: dict[str, Any]) -> dict[str, Any]:
         except OSError as error:
             return {"ok": False, "error": f"打开日志失败：{error}"}
     if command == "get_app_info":
-        return {"ok": True, "info": {"appName": APP_NAME, "version": APP_VERSION, "repo": GITHUB_REPO}}
+        info = handle_agent("system.version", {})
+        return {"ok": True, "info": {"appName": info["appName"], "version": info["appVersion"], "repo": GITHUB_REPO}}
     if command == "get_update_status":
         return {"ok": True, "update": update_manager.snapshot()}
     if command == "check_update":

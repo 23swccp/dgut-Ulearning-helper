@@ -4,12 +4,12 @@
 
 莞工小皮卡
 
-[![Python 3.10+](/docs/badges/python.svg)](https://www.python.org/) [![Windows](/docs/badges/windows.svg)](https://www.microsoft.com/windows/) [![v0.3.2](/docs/badges/version.svg)]({{REPO_URL}}/releases) [![GitHub dgut-bot](/docs/badges/github.svg)]({{REPO_URL}})
+[![Python 3.10+](/docs/badges/python.svg)](https://www.python.org/) [![Windows](/docs/badges/windows.svg)](https://www.microsoft.com/windows/) [![v0.3.3](/docs/badges/version.svg)]({{REPO_URL}}/releases) [![GitHub dgut-bot](/docs/badges/github.svg)]({{REPO_URL}})
 
 **莞工小皮卡**是一款主要由 `Python` 编写的优学院辅助程序，能够自动处理课程签到和课件学习任务。
 仅支持 Windows 系统。
 
-启动莞工小皮卡后,程序会自动打开浏览器调试模式,后续登录等等操作务必在程序打开的浏览器进行,**不要新开另一个进程的浏览器**
+启动后先在终端检测浏览器；未找到时请按提示填写浏览器程序路径，确认有效后才打开网页。后续登录等操作务必在程序打开的浏览器进行，**不要新开另一个进程的浏览器**。网页设置中也可以修改浏览器路径。
 ## 课程签到
 
 签到模块会读取课程、监测当天的课堂活动，并在发现支持的签到类型后自动尝试签到。目前支持数字码签到、一键签到，以及活动数据本身已经包含签到码的二维码签到。

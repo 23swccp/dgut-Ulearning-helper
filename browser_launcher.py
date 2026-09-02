@@ -26,13 +26,16 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from app_paths import data_root, frontend_dist, is_frozen
-from backend_commands import backend, emit_event
+from app_paths import data_root, frontend_dist, is_frozen, resource_root
+from browser_paths import BROWSER_NAMES, resolve_browser_path
+from agent_runtime import new_runtime, publish_runtime, remove_runtime
+from backend_commands import AGENT_SERVICE, backend, configure_agent_registry
 from web_server import (
     CLIENT_CLOSED_EVENT,
     LocalApiHandler,
     SHUTDOWN_EVENT,
     client_last_seen,
+    configure_agent_api,
     reset_client_state,
     stop_backend_tasks,
     update_manager,
@@ -40,7 +43,7 @@ from web_server import (
 from yxy_mutex import APP_MUTEX, NamedMutex, app_mutex_exists
 
 ROOT = data_root()
-FRONTEND = ROOT / "web"
+FRONTEND = resource_root() / "web"
 LOG_PATH = ROOT / "browser-launcher.log"
 SERVICE_LOG_PATH = ROOT / "browser-service.log"
 APP_TITLE = "莞工小皮卡"
@@ -152,9 +155,11 @@ def open_frontend(url: str) -> str:
     print("正在寻找 Chromium 浏览器：")
     path, name = backend.find_browser(progress=lambda candidate: print(f"  {candidate}"), timeout_seconds=10)
     if not path or not name:
+        log_line(LOG_PATH, "未找到 Chromium 浏览器，等待终端配置。")
         return "manual"
     print(f"找到了 {name}：{path}")
     backend.update_settings(browser_name=name, browser_path=path)
+    log_line(LOG_PATH, f"浏览器配置已确认：{name}，{path}")
     print(f"已保存浏览器配置地址：{path}")
     if not url:
         return "debug"
@@ -166,22 +171,14 @@ def open_frontend(url: str) -> str:
 
 def configure_browser_path(value: str) -> bool:
     """首次自动检测失败时，仅由终端接收 Chromium 可执行文件地址。"""
-    candidate = Path(value.strip().strip('"')).expanduser()
-    if not candidate.is_file() or candidate.suffix.lower() != ".exe":
-        print(f"格式或地址错误：{candidate}")
+    resolved = resolve_browser_path(value)
+    if not resolved:
+        print(f"格式或地址错误：{value}")
         print("请填写 Chromium 浏览器 .exe 的完整地址，可使用英文双引号包裹。")
         return False
+    candidate = Path(resolved)
     executable = candidate.name.lower()
-    browser_names = {
-        "msedge.exe": "Microsoft Edge",
-        "chrome.exe": "Google Chrome",
-        "brave.exe": "Brave",
-        "vivaldi.exe": "Vivaldi",
-        "launcher.exe": "Opera",
-        "opera.exe": "Opera",
-        "360chromex.exe": "360 极速浏览器",
-    }
-    browser_name = browser_names.get(executable, "自定义浏览器")
+    browser_name = BROWSER_NAMES.get(executable, "自定义浏览器")
     browser_path = str(candidate.resolve())
     backend.update_settings(browser_name=browser_name, browser_path=browser_path)
     print(f"已保存 {browser_name} 配置：{browser_path}")
@@ -197,7 +194,7 @@ def prompt_for_browser(web_url: str) -> bool:
         try:
             value = input("浏览器地址> ").strip()
         except (EOFError, OSError):
-            print(f"无法读取终端输入。本地程序地址：{web_url}")
+            print("无法读取终端输入，程序已取消启动。")
             return False
         if not value:
             print("填写内容为空，请重新输入。")
@@ -248,10 +245,7 @@ def show_notice_window(message: str, title: str = APP_TITLE, auto_close_ms: int 
 
 
 def show_already_running_notice() -> None:
-    """重复启动时提示片刻，避免窗口一闪而过；冻结模式改用图形提示。"""
-    if is_frozen():
-        show_notice_window(f"{APP_TITLE}已在运行，请勿重复打开。", auto_close_ms=int(DUPLICATE_NOTICE_SECONDS * 1000))
-        return
+    """在启动终端提示片刻，避免重复启动时窗口一闪而过。"""
     print("优学院助手已在运行，请勿重复打开。")
     print(f"此窗口将在 {int(DUPLICATE_NOTICE_SECONDS)} 秒后自动关闭……")
     time.sleep(DUPLICATE_NOTICE_SECONDS)
@@ -279,12 +273,19 @@ def run_background_service(web_port: int, use_static: bool = False, api_port: in
         app_mutex.release()
         return 1
     server: ThreadingHTTPServer | None = None
+    server_started = False
+    runtime = None
     vite: subprocess.Popen | None = None
     log_file = None
     try:
         server_port = web_port if use_static else api_port
         server = ThreadingHTTPServer(("127.0.0.1", server_port), LocalApiHandler)
+        runtime = new_runtime(server_port)
+        configure_agent_registry(runtime.instance_id)
+        configure_agent_api(runtime.auth_token, runtime.instance_id)
+        publish_runtime(runtime)
         threading.Thread(target=server.serve_forever, name="local-api", daemon=True).start()
+        server_started = True
         if use_static:
             print(f"发布包模式：由本地服务直接托管 web/dist，前端地址 http://127.0.0.1:{web_port}", flush=True)
         else:
@@ -309,25 +310,30 @@ def run_background_service(web_port: int, use_static: bool = False, api_port: in
             if vite is not None and vite.poll() is not None:
                 return 1
             last_seen = client_last_seen()
+            AGENT_SERVICE.leases.set("update_handoff", "updater", bool(update_manager.snapshot().get("readyForExit")))
             client_connected = client_connected or bool(last_seen)
             if CLIENT_CLOSED_EVENT.is_set():
                 close_requested_at = close_requested_at or time.monotonic()
-                if time.monotonic() - close_requested_at >= 5:
+                if time.monotonic() - close_requested_at >= 5 and not AGENT_SERVICE.active():
                     return 0
             else:
                 close_requested_at = None
-            if client_connection_expired(client_connected, last_seen):
+            if client_connection_expired(client_connected, last_seen) and not AGENT_SERVICE.active():
                 return 0
             SHUTDOWN_EVENT.wait(0.2)
         return 0
     finally:
+        stop_backend_tasks()
         update_manager.stop()
         if server is not None:
-            server.shutdown()
+            if server_started:
+                server.shutdown()
             server.server_close()
         stop_process(vite)
         if log_file is not None:
             log_file.close()
+        if runtime is not None:
+            remove_runtime(runtime.instance_id)
         app_mutex.release()
 
 
@@ -388,37 +394,19 @@ def redirect_frozen_output() -> None:
         pass
 
 
-def main_frozen() -> int:
-    """Velopack 安装版入口：无控制台，浏览器缺失时通过网页设置处理。"""
-    if app_mutex_exists():
-        show_already_running_notice()
-        return 0
-    SHUTDOWN_EVENT.clear()
-    reset_client_state()
-    try:
-        web_port = choose_available_port(8765)
-        web_url = f"http://127.0.0.1:{web_port}"
-        # 浏览器检测失败不再依赖终端输入：照常启动服务，由网页设置接管。
-        browser_mode = open_frontend("")
-        if browser_mode == "manual":
-            log_line(LOG_PATH, "未找到 Chromium 浏览器；请在网页设置的浏览器模块中选择或填写浏览器路径。")
-            emit_event("BROWSER_NOT_FOUND", "warning", "browser", "未找到 Chromium 浏览器，请在设置中手动选择浏览器程序。")
-        log_line(LOG_PATH, "正在启动本地网页服务…")
-        service = start_background_service(web_port, use_static=True, api_port=web_port)
-        wait_for_frontend(service, f"{web_url}/api/health")
-        if browser_mode == "manual":
-            try:
-                # 没有调试浏览器时用系统默认浏览器打开界面，让用户在设置中配置。
-                os.startfile(web_url)  # noqa: S606
-            except OSError:
-                log_line(LOG_PATH, f"系统默认浏览器打开失败；请手动访问 {web_url}")
-        else:
-            backend.start_browser(web_url)
-        return 0
-    except Exception as error:  # noqa: BLE001 - 无控制台：所有启动错误必须落盘
-        log_line(LOG_PATH, f"启动失败：{error!r}")
-        show_notice_window(f"{APP_TITLE}启动失败：{error}\n详情见本机应用数据目录中的 browser-launcher.log。")
-        return 1
+def prepare_launcher_console() -> None:
+    """安装版只为交互启动器创建终端；后台服务与更新钩子保持无窗口。"""
+    if is_frozen() and sys.platform == "win32":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        if not kernel32.GetConsoleWindow() and not kernel32.AllocConsole():
+            raise OSError("无法创建启动终端，请从命令行重新启动程序。")
+        kernel32.SetConsoleTitleW(f"{APP_TITLE} · 启动设置")
+        sys.stdin = open("CONIN$", "r", encoding="utf-8")
+        sys.stdout = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+        sys.stderr = open("CONOUT$", "w", encoding="utf-8", buffering=1)
+    configure_console_encoding()
 
 
 def main() -> int:
@@ -427,8 +415,13 @@ def main() -> int:
         web_port = int(sys.argv[index + 1])
         api_port = int(sys.argv[sys.argv.index("--api-port") + 1]) if "--api-port" in sys.argv else 8765
         return run_background_service(web_port, "--static" in sys.argv, api_port)
-    if is_frozen():
-        return main_frozen()
+    try:
+        prepare_launcher_console()
+    except OSError as error:
+        log_line(LOG_PATH, str(error))
+        show_notice_window(str(error))
+        return 1
+    log_line(LOG_PATH, "启动终端已就绪，开始检查浏览器配置。")
     if app_mutex_exists():
         show_already_running_notice()
         return 0
@@ -505,9 +498,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    if is_frozen():
-        # 冻结进程没有控制台：先落日志，再跳过面向终端的编码配置。
+    if is_frozen() and "--service" in sys.argv:
         redirect_frozen_output()
-    else:
-        configure_console_encoding()
     raise SystemExit(main())

@@ -3,10 +3,10 @@
 
 构建：
   python -m PyInstaller packaging/dgut-bot.spec --noconfirm
-产物：dist/dgut-bot/dgut-bot.exe + dist/dgut-bot/_internal/
+产物：dist/dgut-bot/{dgut-bot.exe,dgutctl.exe} + 共享 _internal/
 
 - onedir 模式：符合 Velopack 官方对 Python/PyInstaller 应用的要求。
-- windowed 模式：无控制台；启动错误写入 LocalAppData 数据目录的 browser-launcher.log。
+- windowed 模式：交互启动器主动创建设置终端；后台服务与更新钩子保持无窗口。
 - web/dist 和 release-source.json 作为只读资源打进 _internal；用户数据
   统一存放在 LocalAppData，不进入 Velopack 的 current 目录。
 - 正式图标放在 assets/dgut-bot.ico；缺失时以无图标构建，并打印明确提示。
@@ -76,10 +76,28 @@ exe = EXE(
     icon=icon_option,
 )
 
+# Official shared-COLLECT multi-executable onedir layout:
+# https://pyinstaller.org/en/stable/spec-files.html#multipackage-bundles
+cli_analysis = Analysis(
+    [str(ROOT / "agent_cli.py")], pathex=[str(ROOT)], binaries=[], datas=[],
+    hiddenimports=[], hookspath=[], hooksconfig={}, runtime_hooks=[],
+    excludes=["pytest", "backend_commands", "yxy_backend", "yxy_course", "yxy_quiz"],
+    noarchive=False, optimize=0,
+)
+cli_pyz = PYZ(cli_analysis.pure)
+cli_exe = EXE(
+    cli_pyz, cli_analysis.scripts, [], exclude_binaries=True,
+    name="dgutctl", debug=False, bootloader_ignore_signals=False,
+    strip=False, upx=False, console=True, icon=icon_option,
+)
+
 coll = COLLECT(
     exe,
+    cli_exe,
     a.binaries,
     a.datas,
+    cli_analysis.binaries,
+    cli_analysis.datas,
     strip=False,
     upx=False,
     upx_exclude=[],

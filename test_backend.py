@@ -1,6 +1,7 @@
 """不访问学校接口的基础回归测试。运行：python -m unittest -v test_backend.py"""
 
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -9,6 +10,7 @@ from unittest.mock import patch
 
 from yxy_backend import Activity, ApiClient, AppConfig, Course, MonitorState, SignBackend
 from backend_commands import EventBuffer
+from browser_paths import registered_browser_paths
 
 
 class EventBufferTests(unittest.TestCase):
@@ -246,6 +248,84 @@ class BackendTests(unittest.TestCase):
             backend.config.browser_path = str(custom)
             path, name = backend.find_browser()
             self.assertEqual((path, name), (str(custom), "自定义浏览器"))
+
+    def test_copied_browser_path_survives_save_restart_and_launch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            browser = root / "中文 Browser" / "msedge.exe"
+            browser.parent.mkdir()
+            browser.touch()
+            backend = self.make_backend(root)
+            with patch.dict(os.environ, {"DGUT_TEST_BROWSER": str(browser.parent)}):
+                backend.update_settings(browser_path=' \u202a"%DGUT_TEST_BROWSER%/msedge.exe"\u202c ', browser_name="自定义浏览器")
+            restarted = self.make_backend(root)
+            self.assertEqual(restarted.config.browser_path, str(browser.resolve()))
+            with patch("yxy_backend.subprocess.Popen") as popen:
+                self.assertTrue(restarted.start_browser())
+            self.assertEqual(popen.call_args.args[0][0], str(browser.resolve()))
+
+    def test_legacy_quoted_path_and_application_folder_are_usable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            browser = root / "msedge.exe"
+            browser.touch()
+            (root / "config.json").write_text(json.dumps({"browser_path": f'"{browser}"'}), encoding="utf-8")
+            backend = self.make_backend(root)
+            self.assertEqual(backend.find_browser()[0], str(browser.resolve()))
+            backend.update_settings(browser_path=str(root))
+            self.assertEqual(self.make_backend(root).find_browser()[0], str(browser.resolve()))
+
+    def test_invalid_browser_path_does_not_overwrite_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            backend = self.make_backend(root)
+            backend.update_settings(poll_interval=8)
+            previous = (root / "config.json").read_bytes()
+            for path in (root / "missing.exe", root / "note.txt", root):
+                with self.subTest(path=path), self.assertRaisesRegex(ValueError, "浏览器路径无效"):
+                    backend.update_settings(browser_path=str(path), poll_interval=12)
+                self.assertEqual(backend.config.poll_interval, 8)
+                self.assertEqual((root / "config.json").read_bytes(), previous)
+
+    def test_detects_default_edge_without_program_files_environment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            backend = self.make_backend(Path(directory))
+            expected = Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")
+            with (
+                patch.dict(os.environ, {"SystemDrive": "C:"}, clear=True),
+                patch("browser_paths.registered_browser_paths", return_value=[]),
+                patch("yxy_backend.Path.is_file", new=lambda path: path == expected),
+            ):
+                self.assertEqual(backend.find_browser(), (str(expected), "Microsoft Edge"))
+                self.assertEqual(backend.detect_browsers(), [{"name": "Microsoft Edge", "path": str(expected.resolve())}])
+
+    def test_detects_registered_custom_installation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            browser = root / "公司 软件" / "msedge.exe"
+            browser.parent.mkdir()
+            browser.touch()
+            backend = self.make_backend(root)
+            with (
+                patch("browser_paths.registered_browser_paths", side_effect=lambda exe: [str(browser)] if exe == "msedge.exe" else []),
+                patch("yxy_backend.Path.is_file", new=lambda path: path == browser),
+            ):
+                self.assertEqual(backend.find_browser(), (str(browser), "Microsoft Edge"))
+                self.assertEqual(backend.detect_browsers(), [{"name": "Microsoft Edge", "path": str(browser.resolve())}])
+
+    @unittest.skipUnless(os.name == "nt", "Windows App Paths")
+    def test_registry_search_reads_both_hives_and_views_after_missing_keys(self):
+        import winreg
+        from unittest.mock import MagicMock
+        key = MagicMock()
+        with (
+            patch("winreg.OpenKey", side_effect=[FileNotFoundError(), PermissionError(), FileNotFoundError(), key]) as opened,
+            patch("winreg.QueryValueEx", return_value=('"D:\\公司 软件\\msedge.exe"', winreg.REG_SZ)),
+        ):
+            self.assertEqual(registered_browser_paths("msedge.exe"), [r"D:\公司 软件\msedge.exe"])
+        self.assertEqual(opened.call_count, 4)
+        self.assertEqual({call.args[0] for call in opened.call_args_list}, {winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE})
+        self.assertEqual({call.args[3] for call in opened.call_args_list}, {winreg.KEY_READ | winreg.KEY_WOW64_64KEY, winreg.KEY_READ | winreg.KEY_WOW64_32KEY})
 
     def test_optional_account_login_is_saved_separately_and_can_be_cleared(self):
         with tempfile.TemporaryDirectory() as directory:

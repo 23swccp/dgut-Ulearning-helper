@@ -601,6 +601,7 @@ INJECT_JS = r"""
   }
 
   function quizBusy() {
+    if (window.__yxy_agent_waiting) return true;
     return quizUnfinishedCount() > 0;
   }
 
@@ -820,6 +821,7 @@ class CourseConfig:
     document_scroll_speed: float = 3.0
     # 测验自动作答：选择题点 C、判断题点"错误"、每空填英文逗号。
     quiz_auto_answer: bool = True
+    quiz_mode: str = "fixed"
     quiz_choice_enabled: bool = True
     quiz_judgment_enabled: bool = True
     quiz_blank_enabled: bool = True
@@ -1400,6 +1402,8 @@ class CourseController:
         self._iframe_sessions: dict[str, str] = {}
         self._active_config: CourseConfig | None = None
         self._quiz_busy = False
+        self._quiz_gate_lock = threading.Lock()
+        self._agent_answer_provider = None
         self._connection_lost = threading.Event()
         self._last_status: dict[str, Any] | None = None
         self._last_progress_signature = ""
@@ -1808,6 +1812,8 @@ class CourseController:
                 self._finish_recovery((self._last_status or {}).get("state"))
             return
         if event_type == "course-finished":
+            if self._quiz_busy and self._active_config and self._active_config.quiz_mode == "agent":
+                return
             target = self.action_executor.navigation_target()
             if target and target.get("kind") == "forward-dialog":
                 self.action_executor.execute_click(float(target.get("x", -1)), float(target.get("y", -1)))
@@ -1819,6 +1825,8 @@ class CourseController:
 
     def _quiz_busy_now(self) -> bool:
         """防走神动作前检查是否有未完成测验，避免干扰作答坐标。"""
+        if self._quiz_busy:
+            return True
         value = self.eval_js(
             "(function(){var v=document.querySelector('.question-view');"
             "return !!(v && v.getBoundingClientRect().width > 0"
@@ -2106,6 +2114,8 @@ class CourseController:
         return bool(config and self.inject_main_script(config))
 
     def _recover_stall(self, status: dict[str, Any]) -> None:
+        if self._quiz_busy and self._active_config and self._active_config.quiz_mode == "agent":
+            return
         if self.state_machine.state == CourseState.COMPLETED or self._course_completed_emitted:
             return
         state = status.get("state") if isinstance(status.get("state"), dict) else {}
@@ -2136,6 +2146,13 @@ class CourseController:
         while self._running and not self._stop_event.wait(5.0):
             if self.state_machine.state == CourseState.COMPLETED or self._course_completed_emitted:
                 return
+            if self._quiz_busy and self._active_config and self._active_config.quiz_mode == "agent":
+                # Waiting for external input is intentional, not stalled media.
+                self._last_progress_at = time.monotonic()
+                if self._connection_lost.is_set() and self._agent_answer_provider:
+                    provider = self._agent_answer_provider
+                    provider.manager.fail_task(provider.task_id, "QUIZ_PAGE_CHANGED", "The course connection was lost.")
+                continue
             if self._connection_lost.is_set():
                 if not connection_warning:
                     self.emit("[刷课] 已检测到课件页 CDP 连接中断，正在自动重连。", "warn")
@@ -2208,9 +2225,10 @@ class CourseController:
         if config is None or not config.quiz_auto_answer:
             self.emit("[刷课] 检测到未完成测验（自动作答未开启），请人工完成。", "muted")
             return
-        if self._quiz_busy:
-            return
-        self._quiz_busy = True
+        with self._quiz_gate_lock:
+            if self._quiz_busy:
+                return
+            self._quiz_busy = True
         count = int(event.get("unfinished") or 0)
         self._emit_event(
             "QUIZ_DETECTED", "info", "quiz", f"检测到测验：{count} 题",
@@ -2220,7 +2238,25 @@ class CourseController:
 
     def _run_quiz_handler(self) -> None:
         config = self._active_config
+        quiz_session = self._session_id
         try:
+            if config and config.quiz_mode == "agent":
+                if self._agent_answer_provider is None:
+                    self.stop()
+                    return
+                self.eval_js("window.__yxy_agent_waiting = true")
+                handler = QuizHandler(
+                    evaluate=self.eval_js, click=self.action_executor.execute_click,
+                    type_text=self.action_executor.insert_text, is_running=lambda: self._running,
+                    log=lambda *_args: None, dry_run=False, jitter=0,
+                )
+                result = self._agent_answer_provider.answer(handler, self)
+                if result["state"] != "completed":
+                    if self._session_id == quiz_session:
+                        self.stop()
+                else:
+                    self._last_progress_at = time.monotonic()
+                return
             for attempt in range(2):
                 handler = QuizHandler(
                     evaluate=self.eval_js,
@@ -2258,12 +2294,20 @@ class CourseController:
                     self.emit("[刷课] 存在失败题目，30 秒后自动重试一轮。", "warn")
                     self._stop_event.wait(30.0)
         except Exception as error:
-            self.emit(f"[刷课] 测验自动作答异常停止：{error}", "warn")
+            if config and config.quiz_mode == "agent":
+                self.emit("[刷课] Agent 测验处理失败，已停止课程任务。", "warn")
+                if self._session_id == quiz_session:
+                    self.stop()
+            else:
+                self.emit(f"[刷课] 测验自动作答异常停止：{error}", "warn")
         finally:
-            self._quiz_busy = False
+            if self._session_id == quiz_session:
+                if config and config.quiz_mode == "agent" and self._running:
+                    self.eval_js("window.__yxy_agent_waiting = false")
+                self._quiz_busy = False
 
     def _attempt_navigation_if_ready(self, *, recovery: bool = False) -> None:
-        if not self._running or self.state_machine.state != CourseState.WAITING_PAGE_CONFIRM:
+        if self._quiz_busy or not self._running or self.state_machine.state != CourseState.WAITING_PAGE_CONFIRM:
             return
         # 页面可能在首轮失败后补发 next-ready/static-ready 等迟到事件；
         # 停滞期间只允许看门狗按退避间隔发起下一次点击。
@@ -2513,6 +2557,9 @@ class CourseController:
     def _document_scroll_loop(self, interval: float) -> None:
         self.emit("[刷课] 跨域文档滚动器已启动。", "info")
         while self._running and not self._stop_event.is_set():
+            if self._quiz_busy:
+                self._stop_event.wait(max(1.0, interval))
+                continue
             # 文档是页面计划中的后续单元时，等视频/测验实际完成再滚动，避免
             # 两类内容并发造成“看起来完成、实际未验收”的竞态。
             plan = self._page_plan(self.status_snapshot())
@@ -2538,6 +2585,8 @@ class CourseController:
                     "muted",
                 )
             for target in targets:
+                if self._quiz_busy:
+                    break
                 target_id = target.get("id", "")
                 self._document_log_once(
                     f"found-oopif:{target_id}",
@@ -2547,6 +2596,8 @@ class CourseController:
                 if state:
                     self._handle_document_scroll_state(target, state)
             for frame in frames:
+                if self._quiz_busy:
+                    break
                 frame_id = frame.get("id", "")
                 self._document_log_once(
                     f"found:{frame_id}",
@@ -2586,6 +2637,7 @@ class CourseController:
                 self.emit(f"[刷课] 无法启动：{error}", "warn")
                 return False
             self._stop_event.clear()
+            self._quiz_busy = False
             self._connection_lost.clear()
             self._active_config = config
             self._session_token = uuid.uuid4().hex
@@ -2622,6 +2674,7 @@ class CourseController:
             if not self.attach():
                 self.state_machine.fail()
                 return False
+            self.eval_js("window.__yxy_agent_waiting = false")
             # 连接完成即进入 LOADING，确保注入脚本同步产生的首批媒体事件不会
             # 因仍处于 ATTACHING 而被状态机忽略。
             self.state_machine.transition(CourseState.LOADING)

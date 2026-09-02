@@ -24,6 +24,7 @@ from typing import Any, Callable
 from urllib.request import urlopen
 
 from websocket import create_connection
+from agent_protocol import AgentError
 
 PORT = 9222
 TAB_KEYWORD = "ua.dgut.edu.cn/learnCourse"
@@ -50,16 +51,21 @@ QUIZ_STATE_JS = r"""
   document.querySelectorAll('.question-wrapper').forEach(function(w) {
     const tagEl = w.querySelector('.question-type-tag');
     const titleEl = w.querySelector('.question-title-html');
+    const promptEl = titleEl ? titleEl.cloneNode(true) : null;
+    if (promptEl) promptEl.querySelectorAll('.answer-width').forEach(function(blank) {
+      blank.replaceWith(document.createTextNode('[blank]'));
+    });
     const choices = [];
     w.querySelectorAll('a.choice-item').forEach(function(a) {
       if (!visible(a)) return;
       const label = ((a.querySelector('.option') || {}).innerText || '').trim().replace(/[.。]+\s*$/, '');
-      choices.push({label: label, text: (a.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 80), pos: center(a)});
+      const content = a.querySelector('.content-wrapper') || a;
+      choices.push({label: label, text: (content.innerText || '').trim(), selected: !!a.querySelector('.checkbox.selected'), pos: center(a)});
     });
     const judgment = [];
     w.querySelectorAll('.checking-type .choice-btn').forEach(function(b) {
       if (!visible(b)) return;
-      judgment.push({label: /right-btn/.test(b.className) ? '正确' : '错误', pos: center(b)});
+      judgment.push({label: /right-btn/.test(b.className) ? '正确' : '错误', selected: b.classList.contains('selected'), pos: center(b)});
     });
     const blanks = [];
     w.querySelectorAll('.answer-width').forEach(function(s) {
@@ -67,7 +73,7 @@ QUIZ_STATE_JS = r"""
         const input = s.matches('input, textarea, [contenteditable="true"]')
           ? s : s.querySelector('input, textarea, [contenteditable="true"]');
         const target = input && visible(input) ? input : s;
-        blanks.push({pos: center(target), value: String(input ? input.value || input.innerText || '' : s.innerText || '')});
+        blanks.push({pos: center(target), focused: target === document.activeElement || target.contains(document.activeElement), value: String(input ? input.value || input.innerText || '' : s.innerText || '')});
       }
     });
     let submit = null;
@@ -77,7 +83,7 @@ QUIZ_STATE_JS = r"""
       qid: w.id,
       finished: w.classList.contains('finished'),
       type: (tagEl ? tagEl.innerText : '').trim(),
-      title: (titleEl ? titleEl.innerText : '').trim().slice(0, 300),
+      title: (promptEl ? promptEl.textContent : '').trim(),
       choices: choices,
       judgment: judgment,
       blanks: blanks,
@@ -98,6 +104,7 @@ QUIZ_STATE_JS = r"""
   });
   return JSON.stringify({
     present: true,
+    pageId: String((window.__yxy_controller && window.__yxy_controller.get_page_state() || {}).page || ''),
     viewport: {w: window.innerWidth, h: window.innerHeight},
     questions: questions,
     modal: modal
@@ -157,6 +164,7 @@ class QuizState:
     viewport: dict = field(default_factory=dict)
     questions: list[Question] = field(default_factory=list)
     modal: dict | None = None
+    page_id: str = ""
 
 
 class QuizHandler:
@@ -205,6 +213,7 @@ class QuizHandler:
             viewport=data.get("viewport") or {},
             questions=questions,
             modal=data.get("modal"),
+            page_id=str(data.get("pageId") or ""),
         )
 
     def _scroll_question_into_view(self, qid: str) -> bool:
@@ -383,6 +392,7 @@ class QuizHandler:
         因此本方法先逐题选择、最后只提交一次。
         """
         summary = {"done": 0, "skipped": 0, "failed": 0, "modals": 0}
+        provider = FixedAnswerProvider(option_label, judgment_label, blank_text, answer_choice, answer_judgment, answer_blank)
 
         # 弹窗优先清空（可能残留上一页的章节统计弹窗）
         for _ in range(4):
@@ -410,11 +420,7 @@ class QuizHandler:
                     break
                 continue
             def enabled(question: Question) -> bool:
-                if question.type == "判断题":
-                    return answer_judgment
-                if question.type == "填空题":
-                    return answer_blank
-                return answer_choice
+                return provider.enabled(question)
 
             pending = next((
                 q for q in state.questions
@@ -423,10 +429,7 @@ class QuizHandler:
             if pending is None:
                 break
             attempted.add(pending.qid)
-            if pending.type == "填空题":
-                outcome = self._fill_blanks(state, pending, [blank_text] * len(pending.blanks))
-            else:
-                outcome = self._select_answer(state, pending, option_label, judgment_label)
+            outcome = provider.apply(self, state, pending)
             if outcome in ("done", "planned"):
                 summary["done"] += 1
                 if outcome == "planned":
@@ -434,10 +437,7 @@ class QuizHandler:
                     for q in state.questions:
                         if q.finished or q.qid in attempted or not enabled(q):
                             continue
-                        if q.type == "填空题":
-                            self._fill_blanks(state, q, [blank_text] * len(q.blanks))
-                        else:
-                            self._select_answer(state, q, option_label, judgment_label)
+                        provider.apply(self, state, q)
                         summary["done"] += 1
                     break
             elif outcome == "skipped":
@@ -467,6 +467,136 @@ class QuizHandler:
             summary["failed"] += 1
             self._log("提交后未确认到全部完成，请人工检查（可能仍有未答题）", "warn")
         return summary
+
+
+class FixedAnswerProvider:
+    """Legacy GUI policy, separate from reading and page actions."""
+
+    def __init__(self, option="C", judgment="错误", blank=",", choice_enabled=True, judgment_enabled=True, blank_enabled=True):
+        self.option, self.judgment, self.blank = option, judgment, blank
+        self.choice_enabled, self.judgment_enabled, self.blank_enabled = choice_enabled, judgment_enabled, blank_enabled
+
+    def enabled(self, question):
+        return self.judgment_enabled if question.type == "判断题" else self.blank_enabled if question.type == "填空题" else self.choice_enabled
+
+    def apply(self, handler, state, question):
+        if question.type == "填空题":
+            return handler._fill_blanks(state, question, [self.blank] * len(question.blanks))
+        return handler._select_answer(state, question, self.option, self.judgment)
+
+
+class QuizReader:
+    """Only unfinished question semantics cross the Agent boundary."""
+
+    def __init__(self, handler: QuizHandler):
+        self.handler = handler
+
+    def read(self) -> QuizState:
+        return self.handler.read_state()
+
+    @staticmethod
+    def questions(state: QuizState) -> list[dict[str, Any]]:
+        result = []
+        for question in state.questions:
+            if question.finished:
+                continue
+            kind = {"单选题": "single_choice", "判断题": "true_false", "填空题": "fill_blank"}.get(question.type, "unsupported")
+            options = [{"id": str(c["label"]), "text": str(c.get("text") or "")} for c in question.choices] if kind == "single_choice" else []
+            if kind == "single_choice" and (not options or len({c["id"] for c in options}) != len(options) or any(not c["id"] for c in options)):
+                kind = "unsupported"
+            if kind == "fill_blank" and not question.blanks:
+                kind = "unsupported"
+            schema = {"type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": True, "items": {"enum": [c["id"] for c in options]}} if kind == "single_choice" else (
+                {"type": "boolean"} if kind == "true_false" else
+                {"type": "array", "minItems": len(question.blanks), "maxItems": len(question.blanks), "items": {"type": "string", "maxLength": 8192}}
+                if kind == "fill_blank" else {"not": {}}
+            )
+            result.append({"id": question.qid, "type": kind, "sourceType": question.type,
+                           "prompt": question.title, "options": options, "blankCount": len(question.blanks), "answerSchema": schema})
+        return result
+
+
+class QuizExecutor:
+    """Validated per-question actions, refreshed targets, and exactly one submit attempt."""
+
+    def __init__(self, handler: QuizHandler):
+        self.handler = handler
+
+    def execute(self, answers: dict[str, Any], guard, before_submit) -> dict[str, Any]:
+        h = self.handler
+        if h.dry_run:
+            raise AgentError("QUIZ_APPLY_FAILED", "Page execution is disabled.")
+        for qid, value in answers.items():
+            guard()
+            if not h._scroll_question_into_view(qid):
+                raise AgentError("QUIZ_APPLY_FAILED", "The question could not be located.")
+            h._sleep(0.1)
+            state = guard()
+            question = next(q for q in state.questions if q.qid == qid)
+            if question.type == "填空题":
+                for index, text in enumerate(value):
+                    if h._evaluate(SCROLL_BLANK_JS % (json.dumps(qid), index)) != "ok":
+                        raise AgentError("QUIZ_APPLY_FAILED", "The blank could not be located.")
+                    state = guard()
+                    fresh = next(q for q in state.questions if q.qid == qid)
+                    blank = fresh.blanks[index]
+                    existing = str(blank.get("value") or "")
+                    if existing == text:
+                        continue
+                    if existing:
+                        raise AgentError("QUIZ_APPLY_FAILED", "A blank already contains different text; manual review is required.")
+                    if not h._click_in_viewport(blank["pos"], state.viewport):
+                        raise AgentError("QUIZ_APPLY_FAILED", "The blank could not be focused.")
+                    focused_state = guard()
+                    focused_question = next(q for q in focused_state.questions if q.qid == qid)
+                    if not focused_question.blanks[index].get("focused"):
+                        raise AgentError("QUIZ_APPLY_FAILED", "The blank input focus could not be verified.")
+                    if h._type_text is None or not h._type_text(text):
+                        raise AgentError("QUIZ_APPLY_FAILED", "Text input failed.")
+            else:
+                label = ("正确" if value else "错误") if question.type == "判断题" else value[0]
+                options = question.judgment if question.type == "判断题" else question.choices
+                target = next((item for item in options if item["label"] == label), None)
+                if target is None:
+                    raise AgentError("QUIZ_APPLY_FAILED", "The answer target is unavailable.")
+                if not target.get("selected") and not h._click_in_viewport(target["pos"], state.viewport):
+                    raise AgentError("QUIZ_APPLY_FAILED", "The answer target could not be selected.")
+        guard()
+        if h._evaluate(SCROLL_SUBMIT_JS) != "ok":
+            raise AgentError("QUIZ_SUBMIT_FAILED", "The submit button is unavailable.")
+        state = guard()
+        for question in state.questions:
+            if question.qid not in answers:
+                continue
+            value = answers[question.qid]
+            if question.type == "填空题":
+                matches = [str(blank.get("value") or "") for blank in question.blanks] == value
+            else:
+                label = ("正确" if value else "错误") if question.type == "判断题" else value[0]
+                options = question.judgment if question.type == "判断题" else question.choices
+                matches = [item["label"] for item in options if item.get("selected")] == [label]
+            if not matches:
+                raise AgentError("QUIZ_APPLY_FAILED", "The applied answers could not be verified; nothing was submitted.")
+        target = next((q.submit for q in state.questions if q.qid in answers and q.submit), None)
+        if target is None:
+            raise AgentError("QUIZ_SUBMIT_FAILED", "The submit button is unavailable.")
+        state = before_submit()
+        target = next((q.submit for q in state.questions if q.qid in answers and q.submit), None)
+        if target is None:
+            raise AgentError("QUIZ_SUBMIT_FAILED", "The submit target changed before execution.")
+        if not h._click_in_viewport(target, state.viewport):
+            raise AgentError("QUIZ_SUBMIT_FAILED", "The single submit attempt failed.")
+        for _ in range(50):
+            if not h._is_running():
+                raise AgentError("QUIZ_VERIFY_FAILED", "The course stopped before completion was verified.")
+            check = h.read_state()
+            if check.page_id != state.page_id or not check.present:
+                raise AgentError("QUIZ_VERIFY_FAILED", "The question page disappeared before completion was verified.")
+            questions = {q.qid: q for q in check.questions}
+            if all(qid in questions and questions[qid].finished for qid in answers):
+                return {"completedCount": len(answers), "submitAttempts": 1}
+            h._sleep(0.2)
+        raise AgentError("QUIZ_VERIFY_FAILED", "Question completion was not verified after the single submit attempt.")
 
 
 # ---- 独立 CLI 后端：自带一条 CDP 连接，便于单独验证 ----

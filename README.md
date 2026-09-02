@@ -10,7 +10,7 @@
 程序由 **Python 本地服务 + React 浏览器界面**组成，只监听本机回环地址。登录缓存、配置、浏览器资料和日志均保存在本机。
 
 > [!IMPORTANT]
-> 本项目是非官方个人工具，与学校及优学院平台无官方关联。请遵守学校规定、课程要求和平台规则。自动答题只填写固定占位内容，不获取正确答案，可能产生错误作答；请了解风险后再启用。
+> 本项目是非官方个人工具，与学校及优学院平台无官方关联。请遵守学校规定、课程要求和平台规则。GUI 自动答题使用固定占位内容；Agent 模式使用外部程序提供的逐题答案。两者都不获取平台正确答案，也不保证作答正确，请了解风险后再启用。
 
 ## 功能概览
 
@@ -33,7 +33,7 @@
 
 如果 GitHub 页面或安装器下载失败，可前往 [Gitee 备用下载](https://gitee.com/swccq23/dgut-bot/releases) 获取同一安装器。应用内更新源仍是 GitHub；应用内检查或下载更新失败时，请开启支持 GitHub 的网络加速器后重试，不会影响当前版本继续使用。
 
-不需要安装 Python，不需要安装 Node.js，也不需要执行 `pip install`。程序会优先使用设置中保存的浏览器，然后依次检测 Edge、Chrome 和其他 Chromium 浏览器。
+不需要安装 Python，不需要安装 Node.js，也不需要执行 `pip install`。启动时先显示终端，优先使用已保存的浏览器路径，再依次检测 Edge、Chrome 和其他 Chromium 浏览器。未找到时在终端填写浏览器程序路径，确认有效后才打开网页；网页设置中也可修改浏览器。
 
 安装后的核心结构：
 
@@ -63,6 +63,20 @@ cd ..
 首次启动时如果 `web/node_modules` 不存在，启动器也会尝试自动执行 `npm ci`。
 
 ## 使用方法
+
+### Agent JSON CLI（v0.3.3 起提供）
+
+先正常启动小皮卡，再由外部程序执行：
+
+```powershell
+python agent_cli.py capabilities
+python agent_cli.py call system.health
+python agent_cli.py call course.start --input request.json
+```
+
+`call` 从 UTF-8 JSON 文件或 stdin 接收对象，stdout 始终为一个 JSON 文档。工具名、参数 Schema、幂等键和有界等待规则由 `capabilities` 提供；没有交互菜单，也不会自行启动第二个后台。`course.start` 默认使用 Agent 测验模式，等待外部答案；GUI 原有固定策略不变。安装包构建中另含 `current/dgutctl.exe`，普通用户仍使用原 GUI 快捷方式。
+
+开发与协议维护细节见 [交接文档](交接文档.md#agent-cli控制平面2026-09-02)。
 
 ### 课程签到
 
