@@ -18,6 +18,10 @@ BROWSER_NAMES = {
     "launcher.exe": "Opera",
     "opera.exe": "Opera",
     "360chromex.exe": "360 极速浏览器",
+    "360chrome.exe": "360 极速浏览器",
+    "qqbrowser.exe": "QQ 浏览器",
+    "sogouexplorer.exe": "搜狗高速浏览器",
+    "360se.exe": "360 安全浏览器",
 }
 
 BROWSER_INSTALLATIONS = {
@@ -27,7 +31,20 @@ BROWSER_INSTALLATIONS = {
     "Vivaldi": ("Vivaldi", ("vivaldi.exe",)),
     "Opera": ("Opera", ("launcher.exe", "opera.exe")),
     "Chromium": ("Chromium", ("chrome.exe",)),
-    "360 极速浏览器": ("360ChromeX/Chrome", ("360chromex.exe",)),
+    "360 极速浏览器": ("360ChromeX/Chrome", ("360chromex.exe", "360chrome.exe")),
+    "QQ 浏览器": ("Tencent/QQBrowser", ("qqbrowser.exe",)),
+    "搜狗高速浏览器": ("SogouExplorer", ("sogouexplorer.exe",)),
+    "360 安全浏览器": ("360/360se6", ("360se.exe",)),
+    "Opera GX": ("Opera GX", ("launcher.exe", "opera.exe")),
+}
+
+# 同一浏览器不同版本或安装方式的目录，仍使用同一名称和检测顺序。
+BROWSER_INSTALLATION_ALIASES = {
+    "Opera": ("Opera Software/Opera Stable",),
+    "360 极速浏览器": ("360ChromeX", "360Chrome/Chrome", "360Chrome"),
+    "QQ 浏览器": ("QQBrowser",),
+    "搜狗高速浏览器": ("Sogou/SogouExplorer",),
+    "360 安全浏览器": ("360se6", "360/360Browser/Browser", "360Browser/Browser"),
 }
 
 
@@ -159,12 +176,13 @@ def extra_browser_candidates() -> dict[str, list[str]]:
         os.environ.get("PROGRAMFILES(X86)", ""),
         os.environ.get("ProgramW6432", ""),
         os.environ.get("LOCALAPPDATA", ""),
+        os.environ.get("APPDATA", ""),
         str(Path(os.environ["LOCALAPPDATA"]) / "Programs") if os.environ.get("LOCALAPPDATA") else "",
         str(Path(drive + "\\") / "Program Files"),
         str(Path(drive + "\\") / "Program Files (x86)"),
     ]
     try:
-        roots.append(str(Path.home() / "AppData" / "Local"))
+        roots.extend(str(Path.home() / "AppData" / folder) for folder in ("Local", "Roaming"))
     except RuntimeError:
         pass
     # 只枚举本地固定磁盘；不访问网络盘、光驱或可移动盘。
@@ -180,7 +198,9 @@ def extra_browser_candidates() -> dict[str, list[str]]:
     roots = list(dict.fromkeys(root for root in roots if root))
     for name, (relative, executables) in BROWSER_INSTALLATIONS.items():
         candidates = paths.setdefault(name, [])
-        for root in roots:
-            for folder in ("Application", "App", ""):
-                candidates.extend(str(Path(root) / relative / folder / exe) for exe in executables)
-    return paths
+        for relative_path in (relative, *BROWSER_INSTALLATION_ALIASES.get(name, ())):
+            for root in roots:
+                for folder in ("Application", "App", ""):
+                    candidates.extend(str(Path(root) / relative_path / folder / exe) for exe in executables)
+    # 安装目录表是唯一的浏览器顺序来源，注册项不能改变 Edge / Chrome 的优先级。
+    return {name: list(dict.fromkeys(paths.get(name, []))) for name in BROWSER_INSTALLATIONS}

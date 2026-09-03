@@ -12,6 +12,46 @@ from yxy_backend import SignBackend
 
 
 class BrowserDiscoveryTests(unittest.TestCase):
+    def test_extended_browsers_use_shared_candidates_and_keep_edge_chrome_first(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            locations = {
+                "Microsoft Edge": "Programs/Microsoft/Edge/App/msedge.exe",
+                "Google Chrome": "Programs/Google/Chrome/Application/chrome.exe",
+                "360 极速浏览器": "Programs/360Chrome/Chrome/Application/360chrome.exe",
+                "QQ 浏览器": "Programs/Tencent/QQBrowser/App/QQBrowser.exe",
+                "搜狗高速浏览器": "Programs/SogouExplorer/13.0/Runtime/SogouExplorer.exe",
+                "360 安全浏览器": "Roaming/360se6/Chrome-bin/360se.exe",
+                "Opera GX": "Local/Programs/Opera GX/launcher.exe",
+            }
+            for relative in locations.values():
+                browser = root / relative
+                browser.parent.mkdir(parents=True)
+                browser.touch()
+            backend = SignBackend(lambda *_: None, root=root)
+            with (
+                patch.dict(os.environ, {
+                    "PROGRAMFILES": str(root / "Programs"),
+                    "LOCALAPPDATA": str(root / "Local"),
+                    "APPDATA": str(root / "Roaming"),
+                }),
+                patch("browser_paths.registered_browser_paths", return_value=[]),
+            ):
+                candidates = [(name, [p for p in paths if Path(p).is_relative_to(root)])
+                              for name, paths in backend.browser_candidates()]
+                with patch.object(backend, "browser_candidates", return_value=candidates):
+                    self.assertEqual(backend.find_browser(), (
+                        str(root / locations["Microsoft Edge"]), "Microsoft Edge",
+                    ))
+                    detected = backend.detect_browsers()
+            self.assertEqual([item["name"] for item in detected[:2]], ["Microsoft Edge", "Google Chrome"])
+            self.assertEqual({item["name"]: item["path"] for item in detected}, {
+                name: str(root / relative) for name, relative in locations.items()
+            })
+            for name, relative in locations.items():
+                with self.subTest(browser=name):
+                    self.assertEqual(resolve_browser_path(str((root / relative).parent)), str(root / relative))
+
     def test_app_directory_is_found_by_terminal_and_settings(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

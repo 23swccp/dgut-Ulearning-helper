@@ -54,12 +54,12 @@ def choose_browser_file() -> str:
     options = OpenFileName()
     options.lStructSize = ctypes.sizeof(options)
     options.hwndOwner = kernel.GetConsoleWindow()
-    options.lpstrFilter = "Edge 或 Chrome（推荐）\0msedge.exe;chrome.exe\0其他浏览器程序 (*.exe)\0*.exe\0\0"
+    options.lpstrFilter = "Edge / Chrome 的 .exe 文件（推荐）\0msedge.exe;chrome.exe\0其他浏览器 .exe 文件 (*.exe)\0*.exe\0\0"
     options.nFilterIndex = 1
     options.lpstrFile = ctypes.cast(filename, wintypes.LPWSTR)
     options.nMaxFile = len(filename)
     options.lpstrInitialDir = os.environ.get("PROGRAMFILES")
-    options.lpstrTitle = "选择浏览器程序 — 推荐 Microsoft Edge 或 Google Chrome"
+    options.lpstrTitle = "请选择浏览器的 .exe 文件（如 msedge.exe 或 chrome.exe）"
     # 文件和目录必须存在；不改变进程工作目录，不添加到最近文件。
     options.Flags = 0x00001000 | 0x00000800 | 0x00000008 | 0x02000000 | 0x00080000
     if dialog.GetOpenFileNameW(ctypes.byref(options)):

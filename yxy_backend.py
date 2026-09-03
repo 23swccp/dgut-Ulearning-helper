@@ -526,17 +526,7 @@ class SignBackend:
 
     def browser_candidates(self) -> list[tuple[str, list[str]]]:
         """返回按推荐顺序排列的 Chromium 浏览器常见安装位置。"""
-        candidates = [
-            ("Microsoft Edge", [os.path.expandvars(r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe"), os.path.expandvars(r"%PROGRAMFILES%\Microsoft\Edge\Application\msedge.exe"), os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"), r"D:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe", r"D:\Program Files\Microsoft\Edge\Application\msedge.exe"]),
-            ("Google Chrome", [os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"), os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"), os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe"), r"D:\Program Files\Google\Chrome\Application\chrome.exe", r"D:\Program Files (x86)\Google\Chrome\Application\chrome.exe"]),
-            ("Brave", [os.path.expandvars(r"%PROGRAMFILES%\BraveSoftware\Brave-Browser\Application\brave.exe"), os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe"), r"D:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"]),
-            ("Vivaldi", [os.path.expandvars(r"%LOCALAPPDATA%\Vivaldi\Application\vivaldi.exe"), os.path.expandvars(r"%PROGRAMFILES%\Vivaldi\Application\vivaldi.exe")]),
-            ("Opera", [os.path.expandvars(r"%LOCALAPPDATA%\Programs\Opera\launcher.exe"), os.path.expandvars(r"%APPDATA%\Opera Software\Opera Stable\opera.exe")]),
-            ("Chromium", [os.path.expandvars(r"%LOCALAPPDATA%\Chromium\Application\chrome.exe"), os.path.expandvars(r"%PROGRAMFILES%\Chromium\Application\chrome.exe")]),
-            ("360 极速浏览器", [os.path.expandvars(r"%PROGRAMFILES(X86)%\360ChromeX\Chrome\Application\360ChromeX.exe"), os.path.expandvars(r"%LOCALAPPDATA%\360ChromeX\Chrome\Application\360ChromeX.exe"), r"D:\Program Files (x86)\360ChromeX\Chrome\Application\360ChromeX.exe"]),
-        ]
-        extra = extra_browser_candidates()
-        return [(name, extra.get(name, []) + paths) for name, paths in candidates]
+        return list(extra_browser_candidates().items())
 
     def _browser_report(self, message: str, progress: Callable[[str], None] | None = None) -> None:
         try:
