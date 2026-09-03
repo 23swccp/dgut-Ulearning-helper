@@ -4,12 +4,14 @@
 
 莞工小皮卡
 
-[![Python 3.10+](/docs/badges/python.svg)](https://www.python.org/) [![Windows](/docs/badges/windows.svg)](https://www.microsoft.com/windows/) [![v0.3.4](/docs/badges/version.svg)]({{REPO_URL}}/releases) [![GitHub dgut-bot](/docs/badges/github.svg)]({{REPO_URL}})
+[![Python 3.10+](/docs/badges/python.svg)](https://www.python.org/) [![Windows](/docs/badges/windows.svg)](https://www.microsoft.com/windows/) [![v0.3.5](/docs/badges/version.svg)]({{REPO_URL}}/releases) [![GitHub dgut-bot](/docs/badges/github.svg)]({{REPO_URL}})
 
 **莞工小皮卡**是一款主要由 `Python` 编写的优学院辅助程序，能够自动处理课程签到和课件学习任务。
 仅支持 Windows 系统。
 
-启动后先在终端检测浏览器；未找到时请按提示填写浏览器程序路径，确认有效后才打开网页。后续登录等操作务必在程序打开的浏览器进行，**不要新开另一个进程的浏览器**。网页设置中也可以修改浏览器路径。
+> 不同的 Chromium 内核浏览器可能导致刷课功能异常，应优先使用谷歌 Chrome 或 Microsoft Edge 浏览器。
+
+启动后先在终端检测浏览器；未找到时会弹出文件选择窗口，请点选浏览器程序。取消选择后也可在终端粘贴程序路径或安装文件夹，按回车重新选择，输入 q 退出。确认有效后才打开网页。后续登录等操作务必在程序打开的浏览器进行，**不要新开另一个进程的浏览器**。网页设置中也可以修改浏览器路径。
 ## 课程签到
 
 签到模块会读取课程、监测当天的课堂活动，并在发现支持的签到类型后自动尝试签到。目前支持数字码签到、一键签到，以及活动数据本身已经包含签到码的二维码签到。
@@ -263,6 +265,7 @@ python quiz_simulator.py --show --hold 30
 | 问题 | 首先检查 |
 | --- | --- |
 | 程序无法启动或端口异常 | `browser-launcher.log` |
+| 找不到浏览器、扫描超时或目录访问失败 | `browser-detection.log` |
 | 后端服务或接口异常 | `browser-service.log` |
 | 签到请求失败 | 界面事件与 `签到记录.md` |
 | 页面结构识别失败 | 浏览器开发者工具、`quiz_probe.py` |

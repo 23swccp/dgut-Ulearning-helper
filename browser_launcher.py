@@ -27,6 +27,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 from app_paths import data_root, frontend_dist, is_frozen, resource_root
+from browser_dialog import choose_browser_file
 from browser_paths import BROWSER_NAMES, resolve_browser_path
 from agent_runtime import new_runtime, publish_runtime, remove_runtime
 from backend_commands import AGENT_SERVICE, backend, configure_agent_registry
@@ -156,6 +157,7 @@ def open_frontend(url: str) -> str:
     path, name = backend.find_browser(progress=lambda candidate: print(f"  {candidate}"), timeout_seconds=10)
     if not path or not name:
         log_line(LOG_PATH, "未找到 Chromium 浏览器，等待终端配置。")
+        print(f"检测详情已写入：{ROOT / 'browser-detection.log'}")
         return "manual"
     print(f"找到了 {name}：{path}")
     backend.update_settings(browser_name=name, browser_path=path)
@@ -170,7 +172,7 @@ def open_frontend(url: str) -> str:
 
 
 def configure_browser_path(value: str) -> bool:
-    """首次自动检测失败时，仅由终端接收 Chromium 可执行文件地址。"""
+    """验证文件选择窗口或终端传入的浏览器地址并保存。"""
     resolved = resolve_browser_path(value)
     if not resolved:
         print(f"格式或地址错误：{value}")
@@ -186,18 +188,31 @@ def configure_browser_path(value: str) -> bool:
 
 
 def prompt_for_browser(web_url: str) -> bool:
-    """自动检测失败后，在终端循环引导用户输入浏览器程序地址。"""
-    print("未找到 Chromium 浏览器 :(")
-    print('请填写 Chromium 浏览器的 .exe 所在位置（可使用英文双引号）：')
-    print(r'例如："C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"')
+    """先弹出原生文件选择窗口；取消或失败后可重新选择、输入路径或退出。"""
+    print("需要选择可用的浏览器。推荐 Microsoft Edge 或 Google Chrome，以便播放课程视频。")
+    use_picker = True
     while True:
+        if use_picker:
+            try:
+                selected = choose_browser_file()
+            except OSError as error:
+                selected = ""
+                print(f"无法打开文件选择窗口：{error}；可以在下方手动填写路径。")
+                log_line(LOG_PATH, f"文件选择窗口失败：{error}")
+            if selected and configure_browser_path(selected):
+                return True
+            use_picker = False
+        print("按回车打开文件选择窗口，或粘贴浏览器 .exe 地址/安装文件夹；输入 q 退出。")
         try:
-            value = input("浏览器地址> ").strip()
+            value = input("选择浏览器> ").strip()
         except (EOFError, OSError):
             print("无法读取终端输入，程序已取消启动。")
             return False
+        if value.lower() == "q":
+            print("已取消启动。")
+            return False
         if not value:
-            print("填写内容为空，请重新输入。")
+            use_picker = True
             continue
         if configure_browser_path(value):
             return True
@@ -455,9 +470,13 @@ def main() -> int:
 
         # 浏览器是网页界面的入口，必须先确认可用，再启动本地网页服务。
         browser_mode = open_frontend("")
-        if browser_mode == "manual" and not prompt_for_browser(""):
-            print("未配置可用浏览器，程序已取消启动。")
-            return 0
+        if browser_mode == "manual":
+            if check_only:
+                print("启动检查失败：未找到浏览器。正常启动程序后可在文件选择窗口中配置。")
+                return 1
+            if not prompt_for_browser(""):
+                print("未配置可用浏览器，程序已取消启动。")
+                return 0
 
         print("浏览器准备完成，开始启动网页程序。")
         service = start_background_service(web_port, use_static, api_port)

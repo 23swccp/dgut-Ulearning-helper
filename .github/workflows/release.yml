@@ -51,7 +51,7 @@ jobs:
           python -m pip install -r requirements.txt pytest "pyinstaller==${env:PYINSTALLER_VERSION}"
 
       - name: Run Python tests
-        run: python -m pytest -q test_backend.py test_course.py test_launcher.py test_quiz.py test_updater.py test_gitee_release.py test_agent_protocol.py test_agent_tools.py test_agent_cli.py test_agent_runtime.py test_agent_tasks.py test_quiz_requests.py
+        run: python -m pytest -q test_browser_paths.py test_backend.py test_course.py test_launcher.py test_quiz.py test_updater.py test_gitee_release.py test_agent_protocol.py test_agent_tools.py test_agent_cli.py test_agent_runtime.py test_agent_tasks.py test_quiz_requests.py
 
       - name: Tag must match version.py
         shell: pwsh

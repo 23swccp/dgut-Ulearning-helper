@@ -6,6 +6,7 @@ account.json
 签到记录.md
 browser-launcher.log
 browser-service.log
+browser-detection.log
 agent-runtime.json
 .agent-runtime.json.*.tmp
 

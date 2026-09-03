@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import os
+import stat
+import time
+from collections import deque
 from pathlib import Path
+from typing import Callable, Iterator
 
 
 BROWSER_NAMES = {
@@ -15,6 +19,88 @@ BROWSER_NAMES = {
     "opera.exe": "Opera",
     "360chromex.exe": "360 极速浏览器",
 }
+
+BROWSER_INSTALLATIONS = {
+    "Microsoft Edge": ("Microsoft/Edge", ("msedge.exe",)),
+    "Google Chrome": ("Google/Chrome", ("chrome.exe",)),
+    "Brave": ("BraveSoftware/Brave-Browser", ("brave.exe",)),
+    "Vivaldi": ("Vivaldi", ("vivaldi.exe",)),
+    "Opera": ("Opera", ("launcher.exe", "opera.exe")),
+    "Chromium": ("Chromium", ("chrome.exe",)),
+    "360 极速浏览器": ("360ChromeX/Chrome", ("360chromex.exe",)),
+}
+
+
+def scan_browser_directory(
+    root: Path,
+    executables: tuple[str, ...],
+    deadline: float,
+    report: Callable[[str], None],
+    *,
+    max_depth: int = 3,
+    max_directories: int = 128,
+    max_entries: int = 4096,
+) -> Iterator[str]:
+    """只在指定安装目录内广度优先查找，不跟随符号链接或 Windows 联接。"""
+    queue = deque([(root, 0)])
+    directories = entries = 0
+    while queue:
+        if time.monotonic() >= deadline:
+            report("检测超时：尚未检查完安装目录，可手动填写浏览器路径。")
+            return
+        if directories >= max_directories or entries >= max_entries:
+            report(f"扫描达到数量上限：{root}；可手动指定更具体的目录。")
+            return
+        directory, depth = queue.popleft()
+        directories += 1
+        try:
+            attributes = directory.lstat()
+            if stat.S_ISLNK(attributes.st_mode) or getattr(attributes, "st_file_attributes", 0) & 0x400:
+                report(f"跳过链接目录：{directory}")
+                continue
+            report(f"扫描目录：{directory}")
+            # 先直接查找，避免浏览器本体排在大量资源文件之后。
+            for executable in executables:
+                if time.monotonic() >= deadline:
+                    report("检测超时：尚未检查完安装目录，可手动填写浏览器路径。")
+                    return
+                candidate = directory / executable
+                if candidate.is_file():
+                    yield str(candidate.resolve())
+                    return
+            if depth >= max_depth:
+                continue
+            with os.scandir(directory) as children:
+                for child in children:
+                    entries += 1
+                    if time.monotonic() >= deadline:
+                        report("检测超时：尚未检查完安装目录，可手动填写浏览器路径。")
+                        return
+                    if entries >= max_entries:
+                        report(f"扫描达到数量上限：{root}；可手动指定更具体的目录。")
+                        return
+                    if child.is_dir(follow_symlinks=False):
+                        if len(queue) + directories >= max_directories:
+                            report(f"扫描达到目录数量上限：{root}；其余子目录已跳过。")
+                            break
+                        queue.append((Path(child.path), depth + 1))
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError) as error:
+            report(f"无法检查目录：{directory}（{type(error).__name__}：{error}）")
+
+
+def browser_scan_roots(paths: list[str]) -> list[Path]:
+    """从候选程序路径提取浏览器自己的目录，绝不递归扫描整个磁盘。"""
+    roots = []
+    for value in paths:
+        path = Path(value).parent
+        if path.name.lower() in {"application", "app"}:
+            path = path.parent
+        key = os.path.normcase(str(path))
+        if key not in {os.path.normcase(str(root)) for root in roots}:
+            roots.append(path)
+    return roots
 
 
 def normalize_browser_path(value: str) -> str:
@@ -31,11 +117,10 @@ def resolve_browser_path(value: str) -> str:
     candidate = Path(value)
     try:
         if candidate.is_dir():
-            # 也接受浏览器 Application 文件夹，但不递归扫描或猜测其他程序。
-            for executable in BROWSER_NAMES:
-                path = candidate / executable
-                if path.is_file():
-                    return str(path.resolve())
+            # 接受浏览器顶层文件夹、App/Application 或便携版的嵌套目录。
+            return next(scan_browser_directory(
+                candidate, tuple(BROWSER_NAMES), time.monotonic() + 5, lambda _message: None,
+            ), "")
         if candidate.suffix.lower() == ".exe" and candidate.is_file():
             return str(candidate.resolve())
     except (OSError, ValueError):
@@ -70,7 +155,11 @@ def extra_browser_candidates() -> dict[str, list[str]]:
     # 环境变量缺失或由 32 位宿主启动时，仍检查系统盘的标准安装位置。
     drive = os.environ.get("SystemDrive") or "C:"
     roots = [
+        os.environ.get("PROGRAMFILES", ""),
+        os.environ.get("PROGRAMFILES(X86)", ""),
         os.environ.get("ProgramW6432", ""),
+        os.environ.get("LOCALAPPDATA", ""),
+        str(Path(os.environ["LOCALAPPDATA"]) / "Programs") if os.environ.get("LOCALAPPDATA") else "",
         str(Path(drive + "\\") / "Program Files"),
         str(Path(drive + "\\") / "Program Files (x86)"),
     ]
@@ -78,9 +167,20 @@ def extra_browser_candidates() -> dict[str, list[str]]:
         roots.append(str(Path.home() / "AppData" / "Local"))
     except RuntimeError:
         pass
-    for name, relative in (
-        ("Microsoft Edge", Path("Microsoft/Edge/Application/msedge.exe")),
-        ("Google Chrome", Path("Google/Chrome/Application/chrome.exe")),
-    ):
-        paths[name].extend(str(Path(root) / relative) for root in roots if root)
+    # 只枚举本地固定磁盘；不访问网络盘、光驱或可移动盘。
+    if os.name == "nt":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        mask = kernel32.GetLogicalDrives()
+        for index in range(26):
+            drive_root = f"{chr(65 + index)}:\\"
+            if mask & (1 << index) and kernel32.GetDriveTypeW(drive_root) == 3:
+                roots.extend(str(Path(drive_root) / folder) for folder in ("Program Files", "Program Files (x86)", "Programs"))
+    roots = list(dict.fromkeys(root for root in roots if root))
+    for name, (relative, executables) in BROWSER_INSTALLATIONS.items():
+        candidates = paths.setdefault(name, [])
+        for root in roots:
+            for folder in ("Application", "App", ""):
+                candidates.extend(str(Path(root) / relative / folder / exe) for exe in executables)
     return paths

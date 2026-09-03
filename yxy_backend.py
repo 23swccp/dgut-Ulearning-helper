@@ -23,7 +23,10 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from websocket import create_connection
 
-from browser_paths import extra_browser_candidates, normalize_browser_path, resolve_browser_path
+from browser_paths import (
+    BROWSER_INSTALLATIONS, browser_scan_roots, extra_browser_candidates,
+    normalize_browser_path, resolve_browser_path, scan_browser_directory,
+)
 
 
 LMS_BASE = "https://lms.dgut.edu.cn/courseapi"
@@ -533,25 +536,67 @@ class SignBackend:
             ("360 极速浏览器", [os.path.expandvars(r"%PROGRAMFILES(X86)%\360ChromeX\Chrome\Application\360ChromeX.exe"), os.path.expandvars(r"%LOCALAPPDATA%\360ChromeX\Chrome\Application\360ChromeX.exe"), r"D:\Program Files (x86)\360ChromeX\Chrome\Application\360ChromeX.exe"]),
         ]
         extra = extra_browser_candidates()
-        return [(name, paths + extra.get(name, [])) for name, paths in candidates]
+        return [(name, extra.get(name, []) + paths) for name, paths in candidates]
 
-    def detect_browsers(self, timeout_seconds: float = 10.0) -> list[dict[str, str]]:
-        """扫描并返回全部已安装的 Chromium 浏览器，而不是只取第一个。"""
+    def _browser_report(self, message: str, progress: Callable[[str], None] | None = None) -> None:
+        try:
+            with (self.root / "browser-detection.log").open("a", encoding="utf-8") as handle:
+                handle.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {message}\n")
+        except OSError:
+            pass
+        if progress:
+            progress(message)
+
+    def _scan_browsers(self, timeout_seconds: float, progress: Callable[[str], None] | None = None):
+        """终端与网页共用：快速路径检查后，在浏览器安装目录内有限扫描。"""
+        report = lambda message: self._browser_report(message, progress)
         deadline = time.monotonic() + max(0.1, timeout_seconds)
-        detected: list[dict[str, str]] = []
+        self._browser_report(f"开始浏览器检测；时间预算 {timeout_seconds:g} 秒。")
+        candidates = self.browser_candidates()
         checked: set[str] = set()
-        for name, paths in self.browser_candidates():
+        found: set[str] = set()
+        for name, paths in candidates:
             for path in paths:
                 if time.monotonic() >= deadline:
-                    return detected
+                    report("检测超时：尚未检查完候选路径，可手动填写浏览器路径。")
+                    return
                 key = os.path.normcase(os.path.normpath(path))
                 if key in checked:
                     continue
                 checked.add(key)
-                if Path(path).is_file():
-                    detected.append({"name": name, "path": str(Path(path).resolve())})
+                report(path)
+                try:
+                    if Path(path).is_file():
+                        found.add(name)
+                        report(f"找到 {name}：{path}")
+                        yield path, name
+                        break
+                except (OSError, ValueError) as error:
+                    report(f"无法检查文件：{path}（{type(error).__name__}：{error}）")
+        report("开始扫描浏览器安装目录（最多向下 3 层）。")
+        for name, paths in candidates:
+            if name in found or name not in BROWSER_INSTALLATIONS:
+                continue
+            executables = BROWSER_INSTALLATIONS[name][1]
+            for root in browser_scan_roots(paths):
+                if time.monotonic() >= deadline:
+                    report("检测超时：尚未检查完安装目录，可手动填写浏览器路径。")
+                    return
+                path = next(scan_browser_directory(root, executables, deadline, report), "")
+                if path:
+                    found.add(name)
+                    report(f"找到 {name}：{path}")
+                    yield path, name
                     break
-        return detected
+        if time.monotonic() >= deadline:
+            report("检测超时：尚未检查完安装目录，可手动填写浏览器路径。")
+        else:
+            report(f"检测结束：找到 {len(found)} 类浏览器；已检查候选路径和限定深度的安装目录。")
+
+    def detect_browsers(self, timeout_seconds: float = 10.0) -> list[dict[str, str]]:
+        """扫描并返回全部已安装的 Chromium 浏览器，而不是只取第一个。"""
+        return [{"name": name, "path": str(Path(path).resolve())}
+                for path, name in self._scan_browsers(timeout_seconds)]
 
     def find_browser(
         self,
@@ -559,8 +604,7 @@ class SignBackend:
         timeout_seconds: float = 10.0,
     ) -> tuple[str | None, str | None]:
         """按 Edge、Chrome、其他 Chromium 的顺序检查常见安装位置。"""
-        report = progress or (lambda _text: None)
-        deadline = time.monotonic() + max(0.1, timeout_seconds)
+        report = lambda message: self._browser_report(message, progress)
         manual = resolve_browser_path(self.config.browser_path)
         # 网页设置已将浏览器名称与精确路径成对保存；选中的路径优先。
         if manual:
@@ -568,19 +612,7 @@ class SignBackend:
             return manual, self.config.browser_name or Path(manual).stem
         if self.config.browser_path:
             report(f"已保存的浏览器路径无效：{self.config.browser_path}；正在重新检测。")
-        checked: set[str] = set()
-        for name, paths in self.browser_candidates():
-            for path in paths:
-                if time.monotonic() >= deadline:
-                    return None, None
-                key = os.path.normcase(os.path.normpath(path))
-                if key in checked:
-                    continue
-                checked.add(key)
-                report(path)
-                if Path(path).is_file():
-                    return path, name
-        return None, None
+        return next(self._scan_browsers(timeout_seconds, progress), (None, None))
 
     def start_browser(self, url: str = "") -> bool:
         if not self.browser_start_lock.acquire(blocking=False):

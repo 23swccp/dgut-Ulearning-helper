@@ -7,6 +7,7 @@ Velopack SDK/Update.exe 实现；本模块只负责线程调度和 UI 状态展�
 from __future__ import annotations
 
 import json
+import queue
 import threading
 import time
 from pathlib import Path
@@ -18,6 +19,7 @@ import velopack
 
 
 GITHUB_NETWORK_HINT = "请开启支持 GitHub 的网络加速器后重试。"
+CHECK_TIMEOUT_SECONDS = 20.0
 
 
 def select_targets_to_close(targets: list[dict[str, Any]], base_url: str) -> list[dict[str, Any]]:
@@ -89,6 +91,8 @@ class UpdateManager:
         self._manager: Any | None = None
         self._pending: Any | None = None
         self._lock = threading.RLock()
+        self._manager_lock = threading.Lock()
+        self._check_thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._worker: threading.Thread | None = None
         self._exit_callback: Callable[[], None] = lambda: None
@@ -113,7 +117,8 @@ class UpdateManager:
         return velopack.UpdateManager(source)
 
     def _get_manager(self) -> Any:
-        with self._lock:
+        # SDK 初始化不能占用 UI 状态锁，否则超时和状态轮询也会被阻塞。
+        with self._manager_lock:
             if self._manager is None:
                 self._manager = self._manager_factory()
             return self._manager
@@ -213,13 +218,41 @@ class UpdateManager:
         }
 
     def check(self, manual: bool = False) -> dict[str, Any]:
-        if self.snapshot()["state"] in {"checking", "downloading", "handoff", "waiting_for_exit"}:
-            return {"ok": True, "skipped": True}
-        self._set("checking", error="")
+        with self._lock:
+            if self._state["state"] in {"checking", "downloading", "handoff", "waiting_for_exit"}:
+                return {"ok": True, "skipped": True}
+            if self._check_thread and self._check_thread.is_alive():
+                # Python 无法取消 SDK 的原生请求。保留单个请求，避免并发借用
+                # 同一个 SDK manager 或每次重试都泄漏一个线程。
+                message = "上次更新请求仍未结束，请稍后重试；若持续无响应，请重启程序。"
+                self._set(error=message)
+                return {"ok": False, "error": message}
+            self._set("checking", error="")
+
+        # 后台线程只返回结果；超时后绝不能自行修改状态或触发自动下载。
+        results: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
+
+        def query() -> None:
+            try:
+                manager = self._get_manager()
+                pending = manager.get_update_pending_restart()
+                update = None if pending is not None else manager.check_for_updates()
+                results.put((True, (pending, update)))
+            except Exception as error:
+                results.put((False, error))
+
         try:
-            manager = self._get_manager()
-            pending = manager.get_update_pending_restart()
-            update = None if pending is not None else manager.check_for_updates()
+            with self._lock:
+                self._check_thread = threading.Thread(target=query, name="velopack-check-sdk", daemon=True)
+                self._check_thread.start()
+            try:
+                ok, result = results.get(timeout=CHECK_TIMEOUT_SECONDS)
+            except queue.Empty:
+                raise TimeoutError(f"连接 GitHub 超时（{CHECK_TIMEOUT_SECONDS:g} 秒），请检查网络后重试；若持续无响应，请重启程序。") from None
+            if not ok:
+                raise result
+            pending, update = result
+            return self._apply_check_result(pending, update, manual=manual)
         except Exception as error:
             message = str(error) or error.__class__.__name__
             display = f"{message}；{GITHUB_NETWORK_HINT}"
@@ -227,6 +260,8 @@ class UpdateManager:
             if manual:
                 self._add_message("error", "检查更新失败", display)
             return {"ok": False, "error": message}
+
+    def _apply_check_result(self, pending: Any, update: Any, *, manual: bool) -> dict[str, Any]:
         if pending is not None:
             self._pending = pending
             asset = pending
@@ -255,6 +290,11 @@ class UpdateManager:
         threading.Thread(target=delayed, name="velopack-auto-check", daemon=True).start()
 
     def start_download(self) -> dict[str, Any]:
+        with self._lock:
+            if self._state["state"] in {"checking", "downloading", "handoff", "waiting_for_exit"}:
+                return {"ok": True, "skipped": True}
+            if self._check_thread and self._check_thread.is_alive():
+                return {"ok": False, "error": "上次更新请求仍未结束，请稍后重试；若持续无响应，请重启程序。"}
         if self._pending is None:
             threading.Thread(target=lambda: self.check(manual=True), name="velopack-check", daemon=True).start()
             return {"ok": True, "checking": True}

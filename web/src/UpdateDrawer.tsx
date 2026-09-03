@@ -77,14 +77,7 @@ export function UpdateDrawer({ status, open, scroll, actions }: {
   if (!open) return null;
   const downloading = status?.state === "downloading";
   const percent = status ? downloadPercent(status) : 0;
-  const showProgress = Boolean(status);
-  const drawerPercent = status?.state === "idle" ? (!status.error && status.latestVersion ? 100 : 0)
-    : status?.state === "checking" ? 6
-    : status?.state === "available" ? 10
-      : status?.state === "downloading" ? percent
-        : status?.state === "verifying" ? 96
-          : status?.state === "download_failed" || status?.state === "failed_rolled_back" || status?.state === "failed_recovery_required" ? 0
-          : status ? 100 : 0;
+  const showProgress = downloading || status?.state === "verifying";
   return (
     <aside className="update-drawer" role="dialog" aria-label="更新消息" ref={drawerRef}>
       <div className="update-drawer-body" ref={scroll.ref} onScroll={scroll.onSaveScroll}>
@@ -118,8 +111,8 @@ export function UpdateDrawer({ status, open, scroll, actions }: {
           {status?.state === "available" && <span>发现新版本 v{status.latestVersion}，正在准备下载…</span>}
         </div>
         {showProgress && (
-          <span className="update-progress-line drawer-progress" aria-label={`更新进度 ${drawerPercent}%`}>
-            <i style={{ width: `${drawerPercent}%` }} />
+          <span className="update-progress-line drawer-progress" aria-label={`更新进度 ${percent}%`}>
+            <i style={{ width: `${percent}%` }} />
           </span>
         )}
         {status?.state === "ready_to_install" && (

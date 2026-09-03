@@ -59,6 +59,12 @@ class FrozenPathTests(unittest.TestCase):
 
 
 class BrowserLauncherTests(unittest.TestCase):
+    def setUp(self):
+        # 离线回归不弹出会等待人工操作的系统窗口。
+        picker = patch("browser_launcher.choose_browser_file", return_value="")
+        self.browser_picker = picker.start()
+        self.addCleanup(picker.stop)
+
     def frozen_launch_mocks(self, stack):
         stack.enter_context(patch.object(sys, "argv", ["dgut-bot.exe"]))
         stack.enter_context(patch("browser_launcher.is_frozen", return_value=True))
@@ -237,6 +243,52 @@ class BrowserLauncherTests(unittest.TestCase):
         self.assertTrue(browser_launcher.prompt_for_browser("http://127.0.0.1:1420"))
         self.assertEqual(configure.call_args_list[0].args[0], '"Z:\\Browser Folder\\browser.exe"')
         self.assertEqual(configure.call_args_list[1].args[0], '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"')
+
+    def test_picker_selection_is_saved_before_starting_web(self):
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            service, browser, default = self.frozen_launch_mocks(stack)
+            stack.enter_context(patch("browser_launcher.backend.find_browser", return_value=(None, None)))
+            saved = stack.enter_context(patch("browser_launcher.backend.update_settings"))
+            executable = Path(directory) / "中文 Edge App" / "msedge.exe"
+            executable.parent.mkdir()
+            executable.touch()
+
+            def select():
+                service.assert_not_called()
+                browser.assert_not_called()
+                return str(executable)
+
+            self.browser_picker.side_effect = select
+            typed = stack.enter_context(patch("builtins.input"))
+            self.assertEqual(browser_launcher.main(), 0)
+            saved.assert_called_once_with(browser_name="Microsoft Edge", browser_path=str(executable.resolve()))
+            typed.assert_not_called()
+            service.assert_called_once()
+            browser.assert_called_once()
+            default.assert_not_called()
+
+    def test_cancelled_picker_can_be_reopened_or_exit_without_changing_settings(self):
+        with patch("builtins.input", side_effect=["", "q"]), patch("browser_launcher.backend.update_settings") as saved:
+            self.assertFalse(browser_launcher.prompt_for_browser(""))
+            self.assertEqual(self.browser_picker.call_count, 2)
+            saved.assert_not_called()
+
+    def test_picker_error_allows_manual_path_entry(self):
+        self.browser_picker.side_effect = OSError("dialog unavailable")
+        with patch("builtins.input", return_value="manual.exe"), patch("browser_launcher.configure_browser_path", return_value=True) as configure:
+            self.assertTrue(browser_launcher.prompt_for_browser(""))
+            configure.assert_called_once_with("manual.exe")
+
+    def test_check_mode_reports_missing_browser_without_opening_picker(self):
+        with ExitStack() as stack:
+            service, browser, default = self.frozen_launch_mocks(stack)
+            stack.enter_context(patch.object(sys, "argv", ["dgut-bot.exe", "--check"]))
+            stack.enter_context(patch("browser_launcher.backend.find_browser", return_value=(None, None)))
+            self.assertEqual(browser_launcher.main(), 1)
+            self.browser_picker.assert_not_called()
+            service.assert_not_called()
+            browser.assert_not_called()
+            default.assert_not_called()
 
     def test_chooses_another_port_when_first_port_is_busy(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:

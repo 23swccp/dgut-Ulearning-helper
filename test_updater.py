@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -133,6 +134,92 @@ class VelopackAdapterTests(unittest.TestCase):
             self.assertEqual(manager.snapshot()["state"], "idle")
             self.assertIn("网络加速器", manager.snapshot()["error"])
             self.assertFalse(manager.snapshot()["canInstall"])
+
+    def test_check_timeout_discards_late_update_and_allows_retry_after_sdk_returns(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = FakeVelopackManager()
+            manager = self.make_manager(Path(directory), fake)
+            release = threading.Event()
+            entered = threading.Event()
+
+            def blocked_check():
+                entered.set()
+                release.wait(3)
+                return fake.update
+
+            try:
+                with patch.object(fake, "check_for_updates", side_effect=blocked_check) as check, patch(
+                    "velopack_updater.CHECK_TIMEOUT_SECONDS", 0.05
+                ):
+                    result = manager.check(manual=True)
+                    self.assertTrue(entered.is_set())
+                    self.assertFalse(result["ok"])
+                    snapshot = manager.snapshot()
+                    self.assertEqual(snapshot["state"], "idle")
+                    self.assertIn("超时", snapshot["error"])
+                    self.assertEqual(snapshot["messages"][0]["title"], "检查更新失败")
+                    self.assertFalse(manager.check(manual=True)["ok"])
+                    self.assertFalse(manager.start_download()["ok"])
+                    self.assertEqual(check.call_count, 1)
+                    release.set()
+                    manager._check_thread.join(1)
+                    self.assertFalse(manager._check_thread.is_alive())
+                    self.assertEqual(manager.snapshot()["state"], "idle")
+                    self.assertEqual(fake.download_calls, 0)
+                    self.assertIsNone(manager._pending)
+                fake.available = False
+                self.assertFalse(manager.check(manual=True)["updateAvailable"])
+                self.assertEqual(manager.snapshot()["error"], "")
+            finally:
+                release.set()
+                manager._check_thread.join(1)
+
+    def test_slow_sdk_initialization_does_not_block_timeout_or_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = FakeVelopackManager()
+            manager = self.make_manager(Path(directory), fake)
+            release = threading.Event()
+
+            def blocked_factory():
+                release.wait(3)
+                return fake
+
+            manager._manager_factory = blocked_factory
+            started = time.monotonic()
+            try:
+                with patch("velopack_updater.CHECK_TIMEOUT_SECONDS", 0.05):
+                    self.assertFalse(manager.check()["ok"])
+                self.assertEqual(manager.snapshot()["state"], "idle")
+                self.assertLess(time.monotonic() - started, 1)
+            finally:
+                release.set()
+                manager._check_thread.join(1)
+
+    def test_overlapping_checks_and_download_do_not_borrow_busy_sdk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake = FakeVelopackManager(available=False)
+            manager = self.make_manager(Path(directory), fake)
+            release = threading.Event()
+            entered = threading.Event()
+
+            def blocked_check():
+                entered.set()
+                release.wait(3)
+                return None
+
+            with patch.object(fake, "check_for_updates", side_effect=blocked_check) as check:
+                worker = threading.Thread(target=manager.check)
+                worker.start()
+                try:
+                    self.assertTrue(entered.wait(1))
+                    self.assertTrue(manager.check()["skipped"])
+                    self.assertTrue(manager.start_download()["skipped"])
+                    self.assertEqual(manager.snapshot()["state"], "checking")
+                    self.assertEqual(check.call_count, 1)
+                finally:
+                    release.set()
+                    worker.join(1)
+                self.assertEqual(manager.snapshot()["state"], "idle")
 
     def test_shutdown_waits_for_sdk_handoff_and_closes_browser_last(self):
         with tempfile.TemporaryDirectory() as directory:
