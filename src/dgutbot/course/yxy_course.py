@@ -1487,6 +1487,7 @@ class CourseController:
         self._slide_progress: dict[tuple[str, str], dict] = {}
         self._slide_attempts: dict[tuple[str, str, int], int] = {}
         self._agent_answer_provider = None
+        self._ai_answer_provider = None
         self._connection_lost = threading.Event()
         self._last_status: dict[str, Any] | None = None
         self._last_progress_signature = ""
@@ -1914,7 +1915,7 @@ class CourseController:
             status = self.status_snapshot()
             if not status.get("courseFinished") or not self._navigation_precondition_met(status):
                 return
-            if self._quiz_busy and self._active_config and self._active_config.quiz_mode == "agent":
+            if self._quiz_busy and self._active_config and self._active_config.quiz_mode in {"agent", "ai"}:
                 return
             target = self.action_executor.navigation_target()
             if target and target.get("kind") == "forward-dialog":
@@ -2229,7 +2230,7 @@ class CourseController:
     def _recover_stall(self, status: dict[str, Any]) -> None:
         if any(item.get('error') for item in status.get('slideDocuments', [])):
             return  # 平台资源错误不能靠反复点击/恢复播放器解决。
-        if self._quiz_busy and self._active_config and self._active_config.quiz_mode == "agent":
+        if self._quiz_busy and self._active_config and self._active_config.quiz_mode in {"agent", "ai"}:
             return
         if self.state_machine.state == CourseState.COMPLETED or self._course_completed_emitted:
             return
@@ -2293,10 +2294,11 @@ class CourseController:
         while self._running and not self._stop_event.wait(5.0):
             if self.state_machine.state == CourseState.COMPLETED or self._course_completed_emitted:
                 return
-            if self._quiz_busy and self._active_config and self._active_config.quiz_mode == "agent":
-                # Waiting for external input is intentional, not stalled media.
+            if self._quiz_busy and self._active_config and self._active_config.quiz_mode in {"agent", "ai"}:
+                # Waiting for external input or AI generation is intentional, not stalled media.
                 self._last_progress_at = time.monotonic()
-                if self._connection_lost.is_set() and self._agent_answer_provider:
+                if (self._active_config.quiz_mode == "agent" and self._connection_lost.is_set()
+                        and self._agent_answer_provider):
                     provider = self._agent_answer_provider
                     provider.manager.fail_task(provider.task_id, "QUIZ_PAGE_CHANGED", "The course connection was lost.")
                 continue
@@ -2399,8 +2401,9 @@ class CourseController:
         try:
             if not config or not config.quiz_auto_answer or config.quiz_mode == 'disabled':
                 return
-            if config and config.quiz_mode == "agent":
-                if self._agent_answer_provider is None:
+            if config and config.quiz_mode in {"agent", "ai"}:
+                provider = self._agent_answer_provider if config.quiz_mode == "agent" else self._ai_answer_provider
+                if provider is None:
                     self.stop()
                     return
                 self.eval_js("window.__yxy_agent_waiting = true")
@@ -2412,14 +2415,25 @@ class CourseController:
                     dialog_attempts=self._dialog_attempts,
                     auto_dismiss_dialog=config.auto_dismiss_dialog,
                 )
-                result = self._agent_answer_provider.answer(handler, self)
-                if result["state"] != "completed":
-                    if self._session_id == quiz_session:
-                        self.stop()
+                result = provider.answer(handler, self) if config.quiz_mode == "agent" else provider.answer(handler, self, config)
+                if result["state"] == "fallback":
+                    self.emit(f"[刷课] AI 答题失败，改用固定答案：{result['reason']}。", "warn")
                 else:
-                    self._last_progress_at = time.monotonic()
-                return
-            for attempt in range(2):
+                    if result["state"] != "completed":
+                        if self._session_id == quiz_session:
+                            self.stop()
+                    else:
+                        self._last_progress_at = time.monotonic()
+                        completed = int((result.get("result") or {}).get("completedCount") or 0)
+                        self._emit_event(
+                            "QUIZ_SUBMITTED", "success", "quiz",
+                            f"AI 测验已提交：完成 {completed} 题",
+                            state=(self._last_status or {}).get("state"),
+                            data={"completed": completed, "skipped": 0, "failed": 0},
+                        )
+                    return
+            fixed_attempts = 1 if config and config.quiz_mode == "ai" else 2
+            for attempt in range(fixed_attempts):
                 handler = QuizHandler(
                     evaluate=self.eval_js,
                     click=self.action_executor.execute_click,
@@ -2455,19 +2469,25 @@ class CourseController:
                     )
                 if summary["failed"] == 0:
                     break
+                if config and config.quiz_mode == "ai":
+                    self.emit("[刷课] 固定答案降级执行失败，已停止课程任务，请人工检查当前页。", "warn")
+                    if self._session_id == quiz_session:
+                        self.stop()
+                    return
                 if attempt == 0:
                     self.emit("[刷课] 存在失败题目，30 秒后自动重试一轮。", "warn")
                     self._stop_event.wait(30.0)
         except Exception as error:
-            if config and config.quiz_mode == "agent":
-                self.emit("[刷课] Agent 测验处理失败，已停止课程任务。", "warn")
+            if config and config.quiz_mode in {"agent", "ai"}:
+                label = "Agent" if config.quiz_mode == "agent" else "AI"
+                self.emit(f"[刷课] {label} 测验处理失败，已停止课程任务。", "warn")
                 if self._session_id == quiz_session:
                     self.stop()
             else:
                 self.emit(f"[刷课] 测验自动作答异常停止：{error}", "warn")
         finally:
             if self._session_id == quiz_session:
-                if config and config.quiz_mode == "agent" and self._running:
+                if config and config.quiz_mode in {"agent", "ai"} and self._running:
                     self.eval_js("window.__yxy_agent_waiting = false")
                 self._quiz_busy = False
 

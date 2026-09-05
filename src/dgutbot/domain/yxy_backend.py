@@ -384,19 +384,19 @@ class SignBackend:
             if self._course_reservation == task_id:
                 self._course_reservation = None
 
-    def start_course_helper(self, *, rate=None, quiz_mode=None, agent_provider=None, task_id=None) -> bool:
+    def start_course_helper(self, *, rate=None, quiz_mode=None, agent_provider=None, ai_provider=None, task_id=None) -> bool:
         with self._course_operation_lock:
             with self._course_reservation_lock:
                 if self._course_reservation and self._course_reservation != task_id:
                     return False
                 self._course_starting = True
             try:
-                return self._start_course_helper(rate=rate, quiz_mode=quiz_mode, agent_provider=agent_provider)
+                return self._start_course_helper(rate=rate, quiz_mode=quiz_mode, agent_provider=agent_provider, ai_provider=ai_provider)
             finally:
                 with self._course_reservation_lock:
                     self._course_starting = False
 
-    def _start_course_helper(self, *, rate=None, quiz_mode=None, agent_provider=None) -> bool:
+    def _start_course_helper(self, *, rate=None, quiz_mode=None, agent_provider=None, ai_provider=None) -> bool:
         """启动课件学习辅助；需用户先在调试浏览器打开课件学习页。"""
         from dgutbot.course.yxy_course import CourseConfig
         config = CourseConfig(
@@ -406,7 +406,7 @@ class SignBackend:
             document_scroll_interval=float(self.config.course_document_scroll_interval),
             document_scroll_speed=float(self.config.course_document_scroll_speed),
             quiz_auto_answer=bool(self.config.course_quiz_auto_answer) if quiz_mode is None else quiz_mode != "disabled",
-            quiz_mode=quiz_mode or "fixed",
+            quiz_mode=quiz_mode or ("ai" if ai_provider is not None else "fixed"),
             quiz_choice_enabled=bool(self.config.course_quiz_choice_enabled),
             quiz_judgment_enabled=bool(self.config.course_quiz_judgment_enabled),
             quiz_blank_enabled=bool(self.config.course_quiz_blank_enabled),
@@ -415,6 +415,7 @@ class SignBackend:
         if controller._running:
             return False
         controller._agent_answer_provider = agent_provider
+        controller._ai_answer_provider = ai_provider
         return controller.start(config)
 
     def stop_course_helper(self) -> None:

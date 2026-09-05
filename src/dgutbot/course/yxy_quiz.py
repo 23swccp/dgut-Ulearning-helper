@@ -73,10 +73,12 @@ QUIZ_STATE_JS = r"""
       blank.replaceWith(document.createTextNode('[blank]'));
     });
     const choices = [];
+    let hasMedia = Boolean(promptEl && promptEl.querySelector('img, svg, math, canvas, .katex, .MathJax'));
     w.querySelectorAll('a.choice-item').forEach(function(a) {
       if (!visible(a)) return;
       const label = ((a.querySelector('.option') || {}).innerText || '').trim().replace(/[.。]+\s*$/, '');
       const content = a.querySelector('.content-wrapper') || a;
+      hasMedia = hasMedia || Boolean(content.querySelector('img, svg, math, canvas, .katex, .MathJax'));
       choices.push({label: label, text: (content.innerText || '').trim(), selected: !!a.querySelector('.checkbox.selected'), pos: center(a)});
     });
     const judgment = [];
@@ -101,6 +103,7 @@ QUIZ_STATE_JS = r"""
       finished: w.classList.contains('finished'),
       type: (tagEl ? tagEl.innerText : '').trim(),
       title: (promptEl ? promptEl.textContent : '').trim(),
+      hasMedia: hasMedia,
       choices: choices,
       judgment: judgment,
       blanks: blanks,
@@ -175,6 +178,7 @@ class Question:
     finished: bool
     type: str
     title: str
+    has_media: bool = False
     choices: list = field(default_factory=list)
     judgment: list = field(default_factory=list)
     blanks: list = field(default_factory=list)
@@ -233,12 +237,11 @@ class QuizHandler:
         except (TypeError, ValueError):
             self._log("读取测验页面状态失败，稍后重试", "warn")
             return QuizState(present=False)
-        questions = [
-            Question(**{k: item[k] for k in (
-                "qid", "finished", "type", "title", "choices", "judgment", "blanks", "submit",
-            )})
-            for item in data.get("questions", [])
-        ]
+        questions = [Question(
+            qid=item["qid"], finished=item["finished"], type=item["type"], title=item["title"],
+            has_media=bool(item.get("hasMedia", False)), choices=item.get("choices") or [],
+            judgment=item.get("judgment") or [], blanks=item.get("blanks") or [], submit=item.get("submit"),
+        ) for item in data.get("questions", [])]
         return QuizState(
             present=bool(data.get("present")),
             viewport=data.get("viewport") or {},
@@ -608,7 +611,8 @@ class QuizReader:
                 if kind == "fill_blank" else {"not": {}}
             )
             result.append({"id": question.qid, "type": kind, "sourceType": question.type,
-                           "prompt": question.title, "options": options, "blankCount": len(question.blanks), "answerSchema": schema})
+                           "prompt": question.title, "options": options, "blankCount": len(question.blanks),
+                           "hasMedia": question.has_media, "answerSchema": schema})
         return result
 
 

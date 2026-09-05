@@ -62,6 +62,12 @@ class UlearningAiBridge:
         self._client_factory = client_factory
         self._lock = threading.Lock()
 
+    def probe(self) -> None:
+        """Verify that exactly one usable AI conversation is open."""
+        with self._lock:
+            debug_port = self._debug_port() if callable(self._debug_port) else self._debug_port
+            self._access_factory(int(debug_port))
+
     def complete(self, messages: list[dict[str, Any]]) -> BridgeReply:
         prompt = flatten_messages(messages)
         with self._lock:

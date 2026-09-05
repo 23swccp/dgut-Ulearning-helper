@@ -217,6 +217,24 @@ class InjectScriptTests(unittest.TestCase):
         handler.assert_not_called()
         self.assertFalse(controller._quiz_busy)
 
+    def test_ai_fallback_uses_fixed_answers_once_and_stops_on_action_failure(self):
+        controller = CourseController(lambda *_: None)
+        controller._active_config = CourseConfig(quiz_mode="ai")
+        controller._session_id = "session"
+        controller._running = True
+        controller._quiz_busy = True
+        controller._ai_answer_provider = Mock()
+        controller._ai_answer_provider.answer.return_value = {"state": "fallback", "reason": "invalid JSON"}
+        controller.eval_js = Mock(return_value=True)
+        controller.stop = Mock()
+        handler = Mock()
+        handler.answer_all.return_value = {"done": 1, "skipped": 0, "failed": 1, "modals": 0}
+        with patch('yxy_course.QuizHandler', return_value=handler):
+            controller._run_quiz_handler()
+        handler.answer_all.assert_called_once()
+        controller.stop.assert_called_once()
+        self.assertFalse(controller._quiz_busy)
+
     def test_script_observes_video_and_completion_state(self):
         self.assertIn("loadedmetadata", INJECT_JS)
         self.assertIn("ratechange", INJECT_JS)

@@ -16,6 +16,7 @@ from dgutbot.domain.yxy_backend import SignBackend
 from dgutbot.app.velopack_updater import UpdateManager
 from dgutbot.experimental.ulearning_ai import UlearningAiError
 from dgutbot.experimental.ulearning_ai_bridge import UlearningAiBridge
+from dgutbot.course.ai_quiz import UlearningAiAnswerProvider
 from version import APP_NAME, APP_VERSION, GITHUB_REPO
 
 
@@ -220,6 +221,13 @@ def handle(command: str, payload: dict[str, Any]) -> dict[str, Any]:
         backend.stop_monitor()
         return {"ok": True}
     if command == "start_course_helper":
+        if backend.config.course_quiz_auto_answer:
+            try:
+                AI_BRIDGE.probe()
+            except UlearningAiError:
+                return {"ok": False, "error": "未找到可用的课程 AI 对话页；请先打开 AI 助手并点击“进入对话”。"}
+            provider = UlearningAiAnswerProvider(AI_BRIDGE, backend.course_controller.emit)
+            return {"ok": backend.start_course_helper(quiz_mode="ai", ai_provider=provider)}
         return {"ok": backend.start_course_helper()}
     if command == "stop_course_helper":
         backend.stop_course_helper()
