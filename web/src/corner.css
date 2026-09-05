@@ -301,6 +301,33 @@
   margin-top: 14px;
 }
 
+.module-divider {
+  height: 1px;
+  margin: 14px 10px;
+  background: #e7e9ee;
+}
+
+.module-nav .ai-workspace-launch {
+  display: flex;
+  align-items: center;
+  color: #5145c7;
+  background: #f2f0ff;
+}
+
+.module-nav .ai-workspace-launch:hover {
+  color: #4033b5;
+  background: #e9e5ff;
+}
+
+.module-nav .ai-workspace-launch span {
+  flex: 1;
+}
+
+.module-nav .ai-workspace-launch i {
+  font-style: normal;
+  font-weight: 400;
+}
+
 .account-fields .field:disabled {
   background: #f5f6f8;
   color: #9aa3af;

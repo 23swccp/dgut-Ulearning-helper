@@ -53,7 +53,7 @@ class UlearningAiBridge:
     def __init__(
         self,
         *,
-        debug_port: int = 9222,
+        debug_port: int | Callable[[], int] = 9222,
         access_factory: Callable[..., BrowserAiAccess] = discover_browser_access,
         client_factory: Callable[..., UlearningAiClient] = UlearningAiClient,
     ) -> None:
@@ -65,7 +65,8 @@ class UlearningAiBridge:
     def complete(self, messages: list[dict[str, Any]]) -> BridgeReply:
         prompt = flatten_messages(messages)
         with self._lock:
-            access = self._access_factory(self._debug_port)
+            debug_port = self._debug_port() if callable(self._debug_port) else self._debug_port
+            access = self._access_factory(int(debug_port))
             client = self._client_factory(access.create_session())
             chunks = list(client.stream_chat(
                 access.context,

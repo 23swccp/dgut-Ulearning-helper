@@ -425,6 +425,11 @@ function App() {
     }
     if (event.key === "Enter") void run();
   }
+  function openAiWorkspace() {
+    const opened = window.open("/ai.html", "dgut-ai-workspace");
+    if (!opened) { save("浏览器拦截了 AI 工作台窗口，请允许本站打开新窗口"); return; }
+    try { opened.opener = null; opened.focus(); } catch { /* 页面仍已由浏览器打开。 */ }
+  }
   const navItems: Page[] = ["terminal", "learning", "settings", "about"];
   const labels: Record<Page, string> = { terminal: "课程签到", learning: "刷课", settings: "设置", about: "关于" };
   const displayedCourseEvents = visibleCourseEvents(courseEvents, true);
@@ -469,7 +474,7 @@ function App() {
           animate={{ width: 260, x: 0, opacity: 1 }}
           exit={reduceMotion ? { width: 0 } : { width: 0, x: -18, opacity: 0 }}
           transition={reduceMotion ? { duration: 0 } : { duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-        ><div className="module-brand">优学院助手</div><p>模块</p>{navItems.map(item => <button key={item} onClick={() => { setPage(item); if (item === "settings" || item === "about") setDrawerOpen(false); }} className={page === item ? "active" : ""}><b>{icon[item]}</b>{labels[item]}</button>)}</motion.aside>}
+        ><div className="module-brand">优学院助手</div><p>模块</p>{navItems.map(item => <button key={item} onClick={() => { setPage(item); if (item === "settings" || item === "about") setDrawerOpen(false); }} className={page === item ? "active" : ""}><b>{icon[item]}</b>{labels[item]}</button>)}<div className="module-divider"/><button type="button" className="ai-workspace-launch" onClick={openAiWorkspace}><b>✦</b><span>AI 工作台</span><i>↗</i></button></motion.aside>}
       </AnimatePresence>
       <div className="workspace-content">
       {showHeaderUpdate && <UpdateBell status={updateStatus} open={drawerOpen} onToggle={toggleDrawer} />}

@@ -26,7 +26,7 @@ class BrowserLifetime:
                     continue
                 url = urlsplit(str(target.get("url") or ""))
                 if (url.scheme == "http" and url.hostname in {"127.0.0.1", "localhost"}
-                        and url.port == self.web_port and url.path in {"", "/", "/index.html"}):
+                        and url.port == self.web_port and url.path in {"", "/", "/index.html", "/ai.html"}):
                     return True
             return False
         except (OSError, ValueError):

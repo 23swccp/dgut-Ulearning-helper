@@ -47,6 +47,7 @@ class BrowserLifetimeTests(unittest.TestCase):
         for url, kind, expected in (
             ('http://127.0.0.1:1420/', 'page', True),
             ('http://localhost:1420/index.html', 'page', True),
+            ('http://127.0.0.1:1420/ai.html', 'page', True),
             ('http://127.0.0.1:1421/', 'page', False),
             ('http://127.0.0.1:1420/api/health', 'page', False),
             ('http://127.0.0.1.evil.example:1420/', 'page', False),

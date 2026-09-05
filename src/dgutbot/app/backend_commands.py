@@ -14,6 +14,8 @@ from dgutbot.agent.agent_service import AgentService
 from dgutbot.app.app_paths import data_root
 from dgutbot.domain.yxy_backend import SignBackend
 from dgutbot.app.velopack_updater import UpdateManager
+from dgutbot.experimental.ulearning_ai import UlearningAiError
+from dgutbot.experimental.ulearning_ai_bridge import UlearningAiBridge
 from version import APP_NAME, APP_VERSION, GITHUB_REPO
 
 
@@ -121,6 +123,7 @@ def emit_event(code: str, level: str, category: str, message: str, **kwargs: Any
 
 
 backend = SignBackend(emit=emit, emit_event=emit_event, root=ROOT)
+AI_BRIDGE = UlearningAiBridge(debug_port=lambda: int(backend.config.debug_port))
 
 # 应用内自动更新由 Velopack 执行；这里只适配现有前端状态接口。
 update_manager = UpdateManager(
@@ -169,6 +172,17 @@ def handle(command: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, **EVENT_BUFFER.get_events(after_seq)}
     if command == "load_saved_courses":
         return {"ok": backend.load_saved_courses(), "courses": courses()}
+    if command == "ai_chat":
+        try:
+            reply = AI_BRIDGE.complete(payload.get("messages"))
+            return {
+                "ok": True,
+                "answer": reply.text,
+                "reasoning": reply.reasoning,
+                "upstreamToolCallCount": len(reply.upstream_tool_calls),
+            }
+        except (ValueError, UlearningAiError) as error:
+            return {"ok": False, "error": str(error)}
     if command == "start_browser":
         url = str(payload.get("url", ""))
 

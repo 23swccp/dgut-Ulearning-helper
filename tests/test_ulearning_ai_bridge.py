@@ -46,3 +46,14 @@ def test_bridge_collects_text_reasoning_and_upstream_calls():
     assert reply.text == "hello"
     assert reply.reasoning == "think"
     assert reply.upstream_tool_calls == ({"id": "call-1"},)
+
+
+def test_backend_chat_command_returns_only_safe_tool_count():
+    from dgutbot.app import backend_commands
+
+    reply = SimpleNamespace(text="answer", reasoning="", upstream_tool_calls=({"arguments": "private"},))
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(backend_commands.AI_BRIDGE, "complete", lambda _messages: reply)
+        result = backend_commands.handle("ai_chat", {"messages": [{"role": "user", "content": "hello"}]})
+    assert result == {"ok": True, "answer": "answer", "reasoning": "", "upstreamToolCallCount": 1}
+    assert "private" not in repr(result)
