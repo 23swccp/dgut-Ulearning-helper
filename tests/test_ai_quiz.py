@@ -123,8 +123,9 @@ class ReplyBridge:
         self.values = list(values)
         self.calls = 0
 
-    def complete(self, messages):
+    def complete(self, messages, **kwargs):
         self.calls += 1
+        self.model_id = kwargs.get("model_id")
         prompt = messages[0]["content"]
         request_id = json.loads(prompt.split("INPUT_JSON=", 1)[1])["requestId"]
         value = self.values.pop(0)
@@ -153,6 +154,7 @@ def test_provider_generates_then_applies_and_submits_once():
     assert result["result"] == {"completedCount": 3, "submitAttempts": 1}
     assert page.actions.count(("click", 90.0)) == 1
     assert bridge.calls == 1
+    assert bridge.model_id == 1
     assert any("格式校验通过" in text for text, _kind in logs)
 
 

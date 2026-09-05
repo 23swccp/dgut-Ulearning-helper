@@ -4,12 +4,17 @@ import { SafeMarkdown } from "./safeMarkdown";
 type Role = "user" | "assistant";
 type Message = { id: string; role: Role; content: string; reasoning?: string };
 type ChatResult = { ok: boolean; error?: string; answer?: string; reasoning?: string; upstreamToolCallCount?: number };
+type AiModel = { id: number; name: string; vision: boolean; online: boolean; thinking: boolean };
+type ModelsResult = { ok: boolean; error?: string; models?: AiModel[]; selectedModelId?: number };
 
 export function AiWorkspace() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [models, setModels] = useState<AiModel[]>([]);
+  const [modelId, setModelId] = useState(1);
+  const [modelsLoading, setModelsLoading] = useState(true);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -19,7 +24,38 @@ export function AiWorkspace() {
     const timer = window.setInterval(heartbeat, 2000);
     return () => window.clearInterval(timer);
   }, []);
+  useEffect(() => {
+    void command<ModelsResult>("ai_models", {}).then(result => {
+      if (!result.ok) throw new Error(result.error || "无法读取 AI 模型");
+      setModels(result.models || []);
+      setModelId(result.selectedModelId || result.models?.[0]?.id || 1);
+    }).catch(reason => {
+      setError(reason instanceof Error ? reason.message : "无法读取 AI 模型");
+    }).finally(() => setModelsLoading(false));
+  }, []);
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, busy]);
+
+  async function command<T>(name: string, payload: Record<string, unknown>): Promise<T> {
+    const response = await fetch("/api/command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: name, payload }),
+    });
+    return await response.json() as T;
+  }
+
+  async function chooseModel(value: number) {
+    const previous = modelId;
+    setModelId(value);
+    setError("");
+    try {
+      const result = await command<{ ok: boolean; error?: string }>("update_settings", { course_ai_model_id: value });
+      if (!result.ok) throw new Error(result.error || "模型设置保存失败");
+    } catch (reason) {
+      setModelId(previous);
+      setError(reason instanceof Error ? reason.message : "模型设置保存失败");
+    }
+  }
 
   async function send() {
     const content = input.trim();
@@ -31,15 +67,10 @@ export function AiWorkspace() {
     setError("");
     setBusy(true);
     try {
-      const response = await fetch("/api/command", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          command: "ai_chat",
-          payload: { messages: history.map(({ role, content: text }) => ({ role, content: text })) },
-        }),
+      const result = await command<ChatResult>("ai_chat", {
+        modelId,
+        messages: history.map(({ role, content: text }) => ({ role, content: text })),
       });
-      const result = await response.json() as ChatResult;
       if (!result.ok) throw new Error(result.error || "AI 请求失败");
       setMessages(items => [...items, {
         id: crypto.randomUUID(),
@@ -58,13 +89,20 @@ export function AiWorkspace() {
   return <main className="ai-shell">
     <header className="ai-header">
       <div className="ai-brand"><span>✦</span><div><strong>AI 工作台</strong><small>优学院课程 AI · 实验功能</small></div></div>
-      <div className="ai-header-actions"><span className="ai-status">本地安全中继</span><button type="button" onClick={() => window.close()}>关闭</button></div>
+      <div className="ai-header-actions">
+        <label className="ai-model-select"><span>模型</span><select aria-label="AI 模型" value={modelId} disabled={busy || modelsLoading || models.length === 0} onChange={event => void chooseModel(Number(event.target.value))}>
+          {modelsLoading && <option value={modelId}>读取中…</option>}
+          {!modelsLoading && models.length === 0 && <option value={modelId}>不可用</option>}
+          {models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+        </select></label>
+        <span className="ai-status">本地安全中继</span><button type="button" onClick={() => window.close()}>关闭</button>
+      </div>
     </header>
     <section className="ai-conversation" aria-live="polite">
       {messages.length === 0 && <div className="ai-empty">
         <div className="ai-orb">✦</div>
         <h1>从课程上下文开始</h1>
-        <p>请先在优学院课程中打开 AI 助手页面。本工作台会复用浏览器中的短期登录状态，不保存 Cookie 或授权信息。</p>
+        <p>请先在优学院课程中打开 AI 工作台，无需点击“进入对话”。本页面会复用浏览器中的短期登录状态，不保存 Cookie 或授权信息。</p>
         <div className="ai-suggestions">
           {["梳理这门课的重点", "解释一个课程概念", "制定本周复习计划"].map(text => <button key={text} type="button" onClick={() => { setInput(text); inputRef.current?.focus(); }}>{text}</button>)}
         </div>

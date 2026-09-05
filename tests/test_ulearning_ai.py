@@ -13,11 +13,12 @@ from dgutbot.experimental.ulearning_ai import (
 
 
 class FakeResponse:
-    def __init__(self, lines, *, content_type="text/event-stream", error=None):
+    def __init__(self, lines, *, content_type="text/event-stream", error=None, payload=None):
         self.lines = lines
         self.headers = {"Content-Type": content_type}
         self.error = error
         self.closed = False
+        self.payload = payload
 
     def raise_for_status(self):
         if self.error:
@@ -29,6 +30,9 @@ class FakeResponse:
     def close(self):
         self.closed = True
 
+    def json(self):
+        return self.payload
+
 
 class FakeSession:
     def __init__(self, response):
@@ -36,6 +40,10 @@ class FakeSession:
         self.calls = []
 
     def post(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return self.response
+
+    def get(self, url, **kwargs):
         self.calls.append((url, kwargs))
         return self.response
 
@@ -85,6 +93,28 @@ def test_client_uses_observed_contract_and_closes_response():
     assert call["headers"] == {"Accept": "text/event-stream", "Origin": "https://aijx.example"}
     assert call["stream"] is True
     assert response.closed is True
+
+
+def test_client_loads_only_enabled_valid_models():
+    response = FakeResponse([], payload={"result": [
+        {"modelId": 1, "modelName": "通义千问", "enable": 1, "vision": 0},
+        {"modelId": 4, "modelName": "通义千问VL", "enable": 1, "vision": 1},
+        {"modelId": 6, "modelName": "disabled", "enable": 0},
+        {"modelId": "bad", "modelName": "invalid", "enable": 1},
+    ]})
+    session = FakeSession(response)
+    models = UlearningAiClient(session, base_url="https://aijx.example").list_models()
+    assert [(model.id, model.name, model.vision) for model in models] == [
+        (1, "通义千问", False), (4, "通义千问VL", True),
+    ]
+    assert session.calls[0][0] == "https://aijx.example/api/kbChat/getModelListByOrgId"
+    assert response.closed is True
+
+
+def test_client_rejects_empty_model_list():
+    client = UlearningAiClient(FakeSession(FakeResponse([], payload={"result": []})))
+    with pytest.raises(UlearningAiError, match="No enabled"):
+        client.list_models()
 
 
 def test_client_errors_do_not_include_credentials():

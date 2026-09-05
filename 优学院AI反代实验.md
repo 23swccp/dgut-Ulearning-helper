@@ -1,13 +1,14 @@
 # 优学院 AI 反代实验
 
-本实验位于 `codex/ulearning-ai-bridge` 分支，保持与主程序、现有 Agent CLI、签到和刷课逻辑隔离。当前目标是先验证课程 AI 的可复用性；没有把模型输出直接连接到程序操作。
+本实验位于 `codex/ulearning-ai-bridge` 分支。独立 AI 工作台和普通网页端刷课的自动答题已经接入课程 AI；现有 Agent CLI 答题链、签到逻辑与固定答案降级流程保持独立。
 
 ## 已确认的协议
 
 - AI 页面位于 `aijx.dgut.edu.cn` 的跨域 frame 中。
 - 对话接口为 `POST /api/kbChat/chat`，响应为 SSE (`text/event-stream`)。
 - `sessionId` 与 `requestId` 由网页本地生成，不依赖预创建接口。
-- 当前课程使用 `modelId=1`、首次请求 `sessionSign=1`；课程与助手标识从活动 frame 读取。
+- 模型列表从 `GET /api/kbChat/getModelListByOrgId` 动态读取，用户选择的 `modelId` 同时用于独立对话和刷课自动答题；首次请求使用 `sessionSign=1`。
+- 课程与短期授权可从尚未“进入对话”的 Workbench frame 读取，再通过 `GET /api/workbenches/assistantListByOcId` 获取助手标识，因此无需代替用户点击“进入对话”。
 - 活动 frame 的短期授权、浏览器 Cookie、User-Agent 和 Referer 均只在内存中使用，不写配置或日志。
 - 课程暴露的 instruction 与 instructionGraph 当前均为空数组。这不能证明服务端不存在统一的隐藏系统提示。
 - `toolsContentDTOS` 是服务器下发工具调用执行后的结果回传字段，并非客户端自定义工具声明入口。
@@ -16,7 +17,7 @@
 
 主程序网页不内嵌聊天界面。展开主程序侧栏并点击“AI 工作台”，浏览器会打开独立的 `/ai.html` 页面；该页面复用主程序的本地服务和生命周期。
 
-请先在同一个调试浏览器中进入优学院课程并打开课程 AI 助手，否则独立工作台无法发现课程助手与短期授权。
+请先在同一个调试浏览器中进入优学院课程并打开课程 AI 工作台，无需点击“进入对话”。独立页面会动态显示该组织当前启用的模型，所选模型会保存为程序设置，但浏览器短期授权不会落盘。
 
 ## 独立调试服务
 
@@ -40,7 +41,9 @@ python tools/ulearning_ai_bridge_server.py
 - 流式本地响应
 - 图片和文件消息
 - 客户端自定义 tools
-- 模型自动执行签到、刷课或答题操作
+- 模型直接执行签到或任意程序操作
+
+刷课模块只把当前测验的结构化题目交给模型，并严格校验 JSON 答案；真正的页面输入和单次提交仍由本地受控流程完成。AI 生成失败时可在尚未操作页面的前提下整卷降级到固定答案。
 - GUI 入口、开机自启或发布包集成
 
 ## 安全边界
@@ -55,5 +58,4 @@ python tools/ulearning_ai_bridge_server.py
 
 1. 给本地接口增加 SSE 流式输出。
 2. 设计“模型提出工具调用、本地 Agent 层验证并执行、结果回传模型”的独立调度协议。
-3. 添加显式实验开关和 GUI 页面；关闭开关时不加载本模块。
-4. 验证授权失效后的重新发现与恢复，不保存长期凭据。
+3. 验证授权失效后的重新发现与恢复，不保存长期凭据。

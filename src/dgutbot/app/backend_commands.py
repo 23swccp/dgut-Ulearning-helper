@@ -175,7 +175,8 @@ def handle(command: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": backend.load_saved_courses(), "courses": courses()}
     if command == "ai_chat":
         try:
-            reply = AI_BRIDGE.complete(payload.get("messages"))
+            model_id = int(payload.get("modelId", backend.config.course_ai_model_id))
+            reply = AI_BRIDGE.complete(payload.get("messages"), model_id=model_id)
             return {
                 "ok": True,
                 "answer": reply.text,
@@ -183,6 +184,20 @@ def handle(command: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "upstreamToolCallCount": len(reply.upstream_tool_calls),
             }
         except (ValueError, UlearningAiError) as error:
+            return {"ok": False, "error": str(error)}
+    if command == "ai_models":
+        try:
+            models = AI_BRIDGE.models()
+            selected = int(backend.config.course_ai_model_id)
+            if selected not in {model.id for model in models}:
+                selected = models[0].id
+                backend.update_settings(course_ai_model_id=selected)
+            return {"ok": True, "models": [
+                {"id": model.id, "name": model.name, "vision": model.vision,
+                 "online": model.online, "thinking": model.thinking}
+                for model in models
+            ], "selectedModelId": selected}
+        except (OSError, ValueError, UlearningAiError) as error:
             return {"ok": False, "error": str(error)}
     if command == "start_browser":
         url = str(payload.get("url", ""))
@@ -223,10 +238,12 @@ def handle(command: str, payload: dict[str, Any]) -> dict[str, Any]:
     if command == "start_course_helper":
         if backend.config.course_quiz_auto_answer:
             try:
-                AI_BRIDGE.probe()
+                AI_BRIDGE.probe(backend.config.course_ai_model_id)
             except UlearningAiError:
-                return {"ok": False, "error": "未找到可用的课程 AI 对话页；请先打开 AI 助手并点击“进入对话”。"}
-            provider = UlearningAiAnswerProvider(AI_BRIDGE, backend.course_controller.emit)
+                return {"ok": False, "error": "未找到唯一可用的课程 AI 工作台，或所选模型当前不可用。"}
+            provider = UlearningAiAnswerProvider(
+                AI_BRIDGE, backend.course_controller.emit, backend.config.course_ai_model_id,
+            )
             return {"ok": backend.start_course_helper(quiz_mode="ai", ai_provider=provider)}
         return {"ok": backend.start_course_helper()}
     if command == "stop_course_helper":

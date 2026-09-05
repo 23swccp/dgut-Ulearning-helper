@@ -49,6 +49,15 @@ class ChatChunk:
     tool_calls: tuple[dict[str, Any], ...] = ()
 
 
+@dataclass(frozen=True)
+class AiModel:
+    id: int
+    name: str
+    vision: bool = False
+    online: bool = False
+    thinking: bool = False
+
+
 def validate_identifier(name: str, value: str) -> str:
     """Validate opaque protocol identifiers without assuming their generator."""
     text = str(value)
@@ -107,6 +116,44 @@ class UlearningAiClient:
         self._session = session
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+
+    def list_models(self) -> tuple[AiModel, ...]:
+        """Read the models currently enabled for the signed-in organization."""
+        response = None
+        try:
+            response = self._session.get(
+                f"{self._base_url}/api/kbChat/getModelListByOrgId",
+                headers={"Origin": self._base_url},
+                timeout=self._timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (requests.RequestException, ValueError) as error:
+            raise UlearningAiError("The AI model list could not be loaded.") from error
+        finally:
+            if response is not None:
+                response.close()
+        values = payload.get("result") if isinstance(payload, dict) else None
+        if not isinstance(values, list):
+            raise UlearningAiError("The AI service returned an invalid model list.")
+        models = []
+        for item in values:
+            if not isinstance(item, dict) or not item.get("enable"):
+                continue
+            try:
+                model_id = int(item["modelId"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            name = str(item.get("modelName") or "").strip()
+            if model_id <= 0 or not name:
+                continue
+            models.append(AiModel(
+                id=model_id, name=name, vision=bool(item.get("vision")),
+                online=bool(item.get("online")), thinking=bool(item.get("isThinkingModel")),
+            ))
+        if not models:
+            raise UlearningAiError("No enabled AI model is available.")
+        return tuple(models)
 
     def stream_chat(
         self,

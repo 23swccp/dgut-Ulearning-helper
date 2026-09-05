@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 from urllib.request import ProxyHandler, build_opener
 
 import requests
@@ -105,6 +105,53 @@ def _decode_ai_frame(frame_url: str) -> tuple[str, str, str, str] | None:
     return assistant_id, course_id, auth, frame_url
 
 
+def _decode_workbench_frame(frame_url: str) -> tuple[str, str, str] | None:
+    parts = urlsplit(frame_url)
+    if (parts.hostname or "").lower() != AI_HOST or parts.path.lower() != "/ai/workbench":
+        return None
+    query = parse_qs(parts.query, keep_blank_values=True)
+    auth = (query.get("auth") or [""])[0]
+    course_id = (query.get("ocId") or query.get("courseId") or [""])[0]
+    if not auth or not course_id:
+        return None
+    return course_id, auth, frame_url
+
+
+def _assistant_from_workbench(access: BrowserAiAccess) -> str:
+    response = None
+    try:
+        response = access.create_session().get(
+            f"https://{AI_HOST}/api/workbenches/assistantListByOcId",
+            params={"ocId": access.context.course_id},
+            headers={"Origin": f"https://{AI_HOST}"},
+            timeout=(5, 15),
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError) as error:
+        raise UlearningAiError("The course AI assistant list could not be loaded.") from error
+    finally:
+        if response is not None:
+            response.close()
+    result = payload.get("result") if isinstance(payload, dict) else None
+    assistants = result.get("assistantList") if isinstance(result, dict) else None
+    if not isinstance(assistants, list):
+        raise UlearningAiError("The course AI assistant list is invalid.")
+    usable = [item for item in assistants if isinstance(item, dict) and item.get("id") and not item.get("isDelete")]
+
+    def assistant_rank(item: dict[str, Any]) -> tuple[bool, int]:
+        try:
+            order = int(item.get("sort") or 0)
+        except (TypeError, ValueError):
+            order = 0
+        return not bool(item.get("isInuse")), order
+
+    usable.sort(key=assistant_rank)
+    if not usable:
+        raise UlearningAiError("No course AI assistant is available.")
+    return str(usable[0]["id"])
+
+
 def _targets(port: int) -> list[dict[str, Any]]:
     if not 1 <= port <= 65535:
         raise ValueError("port must be between 1 and 65535")
@@ -138,14 +185,23 @@ def discover_browser_access(port: int = 9222, *, target_id: str | None = None) -
     try:
         tree = connection.call("Page.getFrameTree").get("frameTree") or {}
         decoded = []
+        workbenches = []
         for node in _child_frames(tree):
             frame = node.get("frame") or {}
-            access = _decode_ai_frame(str(frame.get("url") or ""))
+            frame_url = str(frame.get("url") or "")
+            access = _decode_ai_frame(frame_url)
             if access is not None:
                 decoded.append(access)
-        if len(decoded) != 1:
-            raise UlearningAiError("The active page does not contain one usable course AI frame.")
-        assistant_id, course_id, authorization, referer = decoded[0]
+            workbench = _decode_workbench_frame(frame_url)
+            if workbench is not None:
+                workbenches.append(workbench)
+        if len(decoded) > 1 or (not decoded and len(workbenches) != 1):
+            raise UlearningAiError("The active page does not contain one unambiguous course AI context.")
+        if decoded:
+            assistant_id, course_id, authorization, referer = decoded[0]
+        else:
+            course_id, authorization, referer = workbenches[0]
+            assistant_id = "pending"
         connection.call("Network.enable")
         cookies = tuple(connection.call("Network.getAllCookies").get("cookies") or ())
         user_agent = str(connection.call("Browser.getVersion").get("userAgent") or "")
@@ -153,10 +209,25 @@ def discover_browser_access(port: int = 9222, *, target_id: str | None = None) -
             raise UlearningAiError("The debug browser did not report its user agent.")
     finally:
         connection.close()
-    return BrowserAiAccess(
+    access = BrowserAiAccess(
         context=ChatContext(assistant_id, course_id, new_protocol_id()),
         authorization=authorization,
         referer=referer,
+        user_agent=user_agent,
+        cookies=cookies,
+    )
+    if assistant_id != "pending":
+        return access
+    assistant_id = _assistant_from_workbench(access)
+    landing_query = parse_qs(urlsplit(referer).query, keep_blank_values=True)
+    direct_params = {"auth": authorization, "courseId": course_id}
+    if (landing_query.get("theme") or [""])[0]:
+        direct_params["theme"] = landing_query["theme"][0]
+    direct_query = urlencode(direct_params)
+    return BrowserAiAccess(
+        context=ChatContext(assistant_id, course_id, new_protocol_id()),
+        authorization=authorization,
+        referer=urlunsplit(("https", AI_HOST, f"/ai/{assistant_id}", direct_query, "")),
         user_agent=user_agent,
         cookies=cookies,
     )

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from dgutbot.experimental.ulearning_ai import ChatChunk, ChatContext
+from dgutbot.experimental.ulearning_ai import AiModel, ChatChunk, ChatContext
 from dgutbot.experimental.ulearning_ai_bridge import UlearningAiBridge, flatten_messages
 
 
@@ -35,6 +35,9 @@ def test_bridge_collects_text_reasoning_and_upstream_calls():
         def __init__(self, _session):
             pass
 
+        def list_models(self):
+            return (AiModel(1, "Qwen"), AiModel(6, "DeepSeek"))
+
         def stream_chat(self, _context, **_kwargs):
             yield ChatChunk(text="hello", reasoning="think", tool_calls=({"id": "call-1"},))
 
@@ -50,7 +53,13 @@ def test_bridge_collects_text_reasoning_and_upstream_calls():
 
 def test_bridge_probe_only_discovers_browser_access():
     calls = []
-    bridge = UlearningAiBridge(access_factory=lambda port: calls.append(port), debug_port=lambda: 9333)
+    access = SimpleNamespace(create_session=lambda: object())
+    client = SimpleNamespace(list_models=lambda: (AiModel(1, "Qwen"),))
+    bridge = UlearningAiBridge(
+        access_factory=lambda port: calls.append(port) or access,
+        client_factory=lambda _session: client,
+        debug_port=lambda: 9333,
+    )
     assert bridge.probe() is None
     assert calls == [9333]
 
@@ -60,7 +69,7 @@ def test_backend_chat_command_returns_only_safe_tool_count():
 
     reply = SimpleNamespace(text="answer", reasoning="", upstream_tool_calls=({"arguments": "private"},))
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(backend_commands.AI_BRIDGE, "complete", lambda _messages: reply)
+        monkeypatch.setattr(backend_commands.AI_BRIDGE, "complete", lambda _messages, **_kwargs: reply)
         result = backend_commands.handle("ai_chat", {"messages": [{"role": "user", "content": "hello"}]})
     assert result == {"ok": True, "answer": "answer", "reasoning": "", "upstreamToolCallCount": 1}
     assert "private" not in repr(result)
@@ -72,12 +81,12 @@ def test_gui_course_start_requires_ready_ai_when_auto_answer_is_enabled():
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(backend_commands.backend.config, "course_quiz_auto_answer", True)
-        monkeypatch.setattr(backend_commands.AI_BRIDGE, "probe", lambda: (_ for _ in ()).throw(UlearningAiError("private")))
+        monkeypatch.setattr(backend_commands.AI_BRIDGE, "probe", lambda *_args: (_ for _ in ()).throw(UlearningAiError("private")))
         start = SimpleNamespace(called=False)
         monkeypatch.setattr(backend_commands.backend, "start_course_helper", lambda **_kwargs: setattr(start, "called", True))
         result = backend_commands.handle("start_course_helper", {})
     assert result["ok"] is False
-    assert "进入对话" in result["error"]
+    assert "AI 工作台" in result["error"]
     assert "private" not in repr(result)
     assert start.called is False
 
@@ -89,7 +98,7 @@ def test_gui_course_start_injects_ai_provider_after_probe():
     controller = SimpleNamespace(emit=lambda *_args: None)
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(backend_commands.backend.config, "course_quiz_auto_answer", True)
-        monkeypatch.setattr(backend_commands.AI_BRIDGE, "probe", lambda: observed.append("probe"))
+        monkeypatch.setattr(backend_commands.AI_BRIDGE, "probe", lambda *_args: observed.append("probe"))
         monkeypatch.setattr(backend_commands.backend, "_course_controller", controller)
         monkeypatch.setattr(backend_commands.backend, "start_course_helper", lambda **kwargs: observed.append(kwargs) or True)
         result = backend_commands.handle("start_course_helper", {})
@@ -97,6 +106,7 @@ def test_gui_course_start_injects_ai_provider_after_probe():
     assert observed[0] == "probe"
     assert observed[1]["quiz_mode"] == "ai"
     assert observed[1]["ai_provider"].bridge is backend_commands.AI_BRIDGE
+    assert observed[1]["ai_provider"].model_id == backend_commands.backend.config.course_ai_model_id
 
 
 def test_gui_course_start_skips_ai_probe_when_auto_answer_is_disabled():
@@ -105,8 +115,22 @@ def test_gui_course_start_skips_ai_probe_when_auto_answer_is_disabled():
     observed = []
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(backend_commands.backend.config, "course_quiz_auto_answer", False)
-        monkeypatch.setattr(backend_commands.AI_BRIDGE, "probe", lambda: observed.append("probe"))
+        monkeypatch.setattr(backend_commands.AI_BRIDGE, "probe", lambda *_args: observed.append("probe"))
         monkeypatch.setattr(backend_commands.backend, "start_course_helper", lambda **kwargs: observed.append(kwargs) or True)
         result = backend_commands.handle("start_course_helper", {})
     assert result == {"ok": True}
     assert observed == [{}]
+
+
+def test_backend_models_command_returns_dynamic_safe_fields():
+    from dgutbot.app import backend_commands
+
+    models = (AiModel(1, "通义千问"), AiModel(4, "通义千问VL", vision=True))
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(backend_commands.AI_BRIDGE, "models", lambda: models)
+        monkeypatch.setattr(backend_commands.backend.config, "course_ai_model_id", 4)
+        result = backend_commands.handle("ai_models", {})
+    assert result == {"ok": True, "models": [
+        {"id": 1, "name": "通义千问", "vision": False, "online": False, "thinking": False},
+        {"id": 4, "name": "通义千问VL", "vision": True, "online": False, "thinking": False},
+    ], "selectedModelId": 4}

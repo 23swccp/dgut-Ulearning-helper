@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from .ulearning_ai import UlearningAiClient, UlearningAiError, new_protocol_id
+from .ulearning_ai import AiModel, UlearningAiClient, UlearningAiError, new_protocol_id
 from .ulearning_ai_browser import BrowserAiAccess, discover_browser_access
 
 
@@ -62,22 +62,33 @@ class UlearningAiBridge:
         self._client_factory = client_factory
         self._lock = threading.Lock()
 
-    def probe(self) -> None:
-        """Verify that exactly one usable AI conversation is open."""
+    def models(self) -> tuple[AiModel, ...]:
+        """Return the currently enabled upstream models without exposing access data."""
         with self._lock:
             debug_port = self._debug_port() if callable(self._debug_port) else self._debug_port
-            self._access_factory(int(debug_port))
+            access = self._access_factory(int(debug_port))
+            return self._client_factory(access.create_session()).list_models()
 
-    def complete(self, messages: list[dict[str, Any]]) -> BridgeReply:
+    def probe(self, model_id: int | None = None) -> None:
+        """Verify that a workbench and the selected model are usable."""
+        models = self.models()
+        if model_id is not None and int(model_id) not in {model.id for model in models}:
+            raise UlearningAiError("The selected AI model is unavailable.")
+
+    def complete(self, messages: list[dict[str, Any]], *, model_id: int = 1) -> BridgeReply:
         prompt = flatten_messages(messages)
         with self._lock:
             debug_port = self._debug_port() if callable(self._debug_port) else self._debug_port
             access = self._access_factory(int(debug_port))
             client = self._client_factory(access.create_session())
+            models = client.list_models()
+            if int(model_id) not in {model.id for model in models}:
+                raise UlearningAiError("The selected AI model is unavailable.")
             chunks = list(client.stream_chat(
                 access.context,
                 request_id=new_protocol_id(),
                 query=prompt,
+                model_id=int(model_id),
             ))
         text = "".join(chunk.text for chunk in chunks)
         reasoning = "".join(chunk.reasoning for chunk in chunks)

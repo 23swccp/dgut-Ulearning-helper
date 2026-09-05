@@ -69,9 +69,10 @@ def _batches(questions: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
 class UlearningAiAnswerProvider:
     """Generate all answers before allowing any page input or submission."""
 
-    def __init__(self, bridge: Any, emit: Callable[[str, str], None]) -> None:
+    def __init__(self, bridge: Any, emit: Callable[[str, str], None], model_id: int = 1) -> None:
         self.bridge = bridge
         self.emit = emit
+        self.model_id = int(model_id)
 
     @staticmethod
     def _enabled(question: dict[str, Any], config: Any) -> bool:
@@ -90,7 +91,10 @@ class UlearningAiAnswerProvider:
             for attempt in range(2):
                 self.emit(f"[刷课] 正在请求 AI 答题（尝试 {attempt + 1}/2，{len(batch)} 题）。", "info")
                 try:
-                    reply = self.bridge.complete([{"role": "user", "content": _prompt(request_id, batch, reason)}])
+                    reply = self.bridge.complete(
+                        [{"role": "user", "content": _prompt(request_id, batch, reason)}],
+                        model_id=self.model_id,
+                    )
                     if reply.upstream_tool_calls:
                         raise AiAnswerError("AI 返回了不允许的工具调用")
                     parsed = _parse_reply(reply.text, request_id, batch)

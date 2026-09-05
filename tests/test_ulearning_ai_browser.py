@@ -6,6 +6,7 @@ from dgutbot.experimental.ulearning_ai import UlearningAiError
 from dgutbot.experimental.ulearning_ai_browser import (
     BrowserAiAccess,
     _decode_ai_frame,
+    _decode_workbench_frame,
     _is_dgut_domain,
     discover_browser_access,
 )
@@ -21,6 +22,16 @@ def test_decode_ai_frame_uses_path_id_and_required_query_values():
         "https://aijx.dgut.edu.cn/ai/1234?auth=memory-only&courseId=654321&theme=blue",
     )
     assert _decode_ai_frame("https://aijx.dgut.edu.cn/ai/agentPreview?path=x") is None
+
+
+def test_decode_workbench_frame_uses_pre_conversation_context():
+    assert _decode_workbench_frame(
+        "https://aijx.dgut.edu.cn/ai/Workbench?auth=memory-only&ocId=654321&theme=blue"
+    ) == (
+        "654321", "memory-only",
+        "https://aijx.dgut.edu.cn/ai/Workbench?auth=memory-only&ocId=654321&theme=blue",
+    )
+    assert _decode_workbench_frame("https://aijx.dgut.edu.cn/ai/Workbench?ocId=1") is None
 
 
 def test_access_repr_redacts_authorization_and_cookies():
@@ -50,3 +61,36 @@ def test_discovery_does_not_guess_between_multiple_workbenches():
     with patch("dgutbot.experimental.ulearning_ai_browser._targets", return_value=targets):
         with pytest.raises(UlearningAiError, match="Multiple"):
             discover_browser_access()
+
+
+def test_discovery_builds_context_from_workbench_without_entering_conversation():
+    targets = [{
+        "id": "one", "type": "page", "url": "https://lms.dgut.edu.cn/#/course/workbench",
+        "webSocketDebuggerUrl": "ws://127.0.0.1/devtools/page/one",
+    }]
+
+    class Connection:
+        def __init__(self, _url):
+            pass
+
+        def close(self):
+            pass
+
+        def call(self, method, _params=None):
+            if method == "Page.getFrameTree":
+                return {"frameTree": {"frame": {}, "childFrames": [{"frame": {
+                    "url": "https://aijx.dgut.edu.cn/ai/Workbench?auth=memory-only&ocId=654321&theme=blue",
+                }}]}}
+            if method == "Network.getAllCookies":
+                return {"cookies": []}
+            if method == "Browser.getVersion":
+                return {"userAgent": "test-agent"}
+            return {}
+
+    with patch("dgutbot.experimental.ulearning_ai_browser._targets", return_value=targets), \
+            patch("dgutbot.experimental.ulearning_ai_browser._CdpConnection", Connection), \
+            patch("dgutbot.experimental.ulearning_ai_browser._assistant_from_workbench", return_value="1234"):
+        access = discover_browser_access()
+    assert access.context.assistant_id == "1234"
+    assert access.context.course_id == "654321"
+    assert access.referer == "https://aijx.dgut.edu.cn/ai/1234?auth=memory-only&courseId=654321&theme=blue"

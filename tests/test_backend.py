@@ -59,6 +59,7 @@ class BackendTests(unittest.TestCase):
                 "course_playback_rate": 99,
                 "course_quiz_auto_answer": "false",
                 "course_quiz_choice_enabled": "false",
+                "course_ai_model_id": 0,
             },
             Path("."),
         )
@@ -70,6 +71,7 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(config.course_playback_rate, 16)
         self.assertFalse(config.course_quiz_auto_answer)
         self.assertFalse(config.course_quiz_choice_enabled)
+        self.assertEqual(config.course_ai_model_id, 1)
         self.assertTrue(config.course_quiz_judgment_enabled)
         self.assertTrue(config.course_quiz_blank_enabled)
 

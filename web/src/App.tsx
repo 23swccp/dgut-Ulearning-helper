@@ -19,6 +19,7 @@ type AppConfig = {
   course_playback_rate?: number; course_auto_dismiss_dialog?: boolean; course_document_scroll_enabled?: boolean;
   course_quiz_auto_answer?: boolean; course_quiz_choice_enabled?: boolean;
   course_quiz_judgment_enabled?: boolean; course_quiz_blank_enabled?: boolean;
+  course_ai_model_id?: number;
 };
 type AppInfo = { appName: string; version: string; repo: string };
 type BackendResult = { ok: boolean; error?: string; courses?: Course[]; course?: Course | null; config?: AppConfig; account?: AccountLogin; browsers?: BrowserOption[]; events?: CourseEvent[]; latestSeq?: number; status?: CourseStatus; info?: AppInfo; update?: UpdateStatus };

@@ -54,6 +54,7 @@ class AppConfig:
     course_quiz_choice_enabled: bool = True
     course_quiz_judgment_enabled: bool = True
     course_quiz_blank_enabled: bool = True
+    course_ai_model_id: int = 1
 
     @staticmethod
     def _number(value, default: float, minimum: float, maximum: float, *, integer: bool = False):
@@ -101,6 +102,7 @@ class AppConfig:
             course_quiz_choice_enabled=cls._boolean(merged["course_quiz_choice_enabled"], defaults.course_quiz_choice_enabled),
             course_quiz_judgment_enabled=cls._boolean(merged["course_quiz_judgment_enabled"], defaults.course_quiz_judgment_enabled),
             course_quiz_blank_enabled=cls._boolean(merged["course_quiz_blank_enabled"], defaults.course_quiz_blank_enabled),
+            course_ai_model_id=cls._number(merged["course_ai_model_id"], defaults.course_ai_model_id, 1, 1_000_000, integer=True),
         )
         if not any((
             merged["course_quiz_choice_enabled"],
