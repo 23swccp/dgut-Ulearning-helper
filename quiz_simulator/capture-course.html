@@ -1,0 +1,37 @@
+<!doctype html><meta charset="utf-8"><title>CAPTURE_PRIVATE_MARKER_123456789</title>
+<style>body{font:16px system-ui}iframe{width:450px;height:180px}.choice-item{padding:15px;border:1px solid #888}.selected{background:#bde5be}.answer-width{padding:10px}</style>
+<main class="question-view">
+  <section class="question-wrapper" id="question-123456789">
+    <span class="question-type-tag">单选题</span><div class="question-title-html">CAPTURE_PRIVATE_MARKER_123456789</div>
+    <a class="choice-item"><span class="checkbox"></span><span class="option">A.</span><span>CAPTURE_PRIVATE_MARKER_123456789</span></a>
+    <input class="answer-width" aria-label="CAPTURE_PRIVATE_MARKER_123456789" value="CAPTURE_PRIVATE_MARKER_123456789">
+    <input type="password" value="CAPTURE_PRIVATE_MARKER_123456789">
+  </section>
+  <div class="question-operation-area"><button class="btn-submit" data-bind="click: submit('CAPTURE_PRIVATE_MARKER_123456789')">提交</button></div>
+  <output></output><a href="/secret/CAPTURE_PRIVATE_MARKER_123456789?token=CAPTURE_PRIVATE_MARKER_123456789">资源</a>
+</main>
+<iframe id="same" src="capture-frame.html?kind=same"></iframe><iframe id="cross"></iframe>
+<script>
+  const secret = 'CAPTURE_PRIVATE_MARKER_123456789';
+  window.interactions = {clicks: 0, inputs: 0, submits: 0};
+  document.addEventListener('click', () => interactions.clicks++);
+  document.addEventListener('input', () => interactions.inputs++);
+  document.querySelector('#cross').src = 'http://localhost:' + location.port + '/capture-frame.html?kind=cross';
+  const observable = value => Object.assign(() => value, {peek: () => value, isObservable: true});
+  window.ko = {isObservable: value => !!value.isObservable};
+  window.koLearnCourseViewModel = {currentPage: observable({id: observable(secret), record: observable({status: observable(false)})})};
+  document.querySelector('.choice-item').onclick = e => { if (e.isTrusted) document.querySelector('.checkbox').classList.add('selected'); };
+  document.querySelector('button').onclick = async e => {
+    if (!e.isTrusted) return;
+    interactions.submits++;
+    const response = await fetch('/capture-save?token=' + secret, {method:'POST', headers:{'Content-Type':'application/json','Authorization': 'Bearer ' + secret},
+      body: JSON.stringify({token:secret, answers:[{questionId:secret, value:document.querySelector('input').value}]})});
+    const result = await response.json();
+    document.querySelector('.question-wrapper').classList.add('finished');
+    document.querySelector('output').textContent = result.message;
+    koLearnCourseViewModel.currentPage = observable({id: observable(secret), record: observable({status: observable(true)})});
+  };
+  // Open shadow root must be explicitly represented in the structural snapshot.
+  const host = document.createElement('div'); document.body.append(host);
+  host.attachShadow({mode:'open'}).innerHTML = '<button>确定</button>';
+</script>

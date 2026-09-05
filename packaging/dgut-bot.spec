@@ -20,7 +20,6 @@ ICON = ROOT / "assets" / "dgut-bot.ico"
 datas = [
     (str(ROOT / "web" / "dist"), "web/dist"),
     (str(ROOT / "release-source.json"), "."),
-    (str(ROOT / "README.md"), "."),
 ]
 
 if ICON.is_file():
@@ -30,8 +29,8 @@ else:
     print("提示：未找到 assets/dgut-bot.ico，本次以无图标构建；不影响功能。")
 
 a = Analysis(
-    [str(ROOT / "browser_launcher.py")],
-    pathex=[str(ROOT)],
+    [str(ROOT / "src" / "dgutbot" / "app" / "browser_launcher.py")],
+    pathex=[str(ROOT), str(ROOT / "src")],
     binaries=[],
     datas=datas,
     hiddenimports=[],
@@ -41,15 +40,8 @@ a = Analysis(
     excludes=[
         # 测试与开发工具不进入发行包。
         "pytest",
-        "test_backend",
-        "test_course",
-        "test_launcher",
-        "test_quiz",
-        "test_updater",
-        "quiz_simulator",
-        "quiz_probe",
-        "quiz_walk",
-        "run_brush",
+        "tests",
+        "tools",
     ],
     noarchive=False,
     optimize=0,
@@ -79,9 +71,9 @@ exe = EXE(
 # Official shared-COLLECT multi-executable onedir layout:
 # https://pyinstaller.org/en/stable/spec-files.html#multipackage-bundles
 cli_analysis = Analysis(
-    [str(ROOT / "agent_cli.py")], pathex=[str(ROOT)], binaries=[], datas=[],
+    [str(ROOT / "src" / "dgutbot" / "agent" / "agent_cli.py")], pathex=[str(ROOT), str(ROOT / "src")], binaries=[], datas=[],
     hiddenimports=[], hookspath=[], hooksconfig={}, runtime_hooks=[],
-    excludes=["pytest", "backend_commands", "yxy_backend", "yxy_course", "yxy_quiz"],
+    excludes=["pytest", "dgutbot.app.backend_commands", "dgutbot.domain.yxy_backend", "dgutbot.course.yxy_course", "dgutbot.course.yxy_quiz"],
     noarchive=False, optimize=0,
 )
 cli_pyz = PYZ(cli_analysis.pure)

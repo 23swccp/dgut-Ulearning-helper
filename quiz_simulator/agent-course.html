@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent 课件实验室（合成数据）</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.6 system-ui; background: #f3f6fa; color: #203047; }
+  header { padding: 18px; background: #18324b; color: white; }
+  main { max-width: 850px; margin: 24px auto; padding: 24px; background: white; }
+  .question-wrapper { padding: 20px 0; border-bottom: 1px solid #ccd5df; }
+  .question-type-tag { color: #13704a; margin-right: 12px; }
+  .choice-item, .choice-btn { display: flex; gap: 16px; padding: 14px; margin: 8px 0; border: 1px solid #aebcca; cursor: pointer; }
+  .checkbox { width: 20px; height: 20px; border: 2px solid #6b7b8e; }
+  .selected { background: #b8e8cc; }
+  .checking-type { display: flex; gap: 20px; }
+  .answer-width { display: inline-block; margin: 6px; }
+  input { width: 190px; padding: 12px; font: inherit; }
+  button { padding: 12px 28px; cursor: pointer; }
+  .question-operation-area { padding: 30px 0; }
+  .limit-time-mask, #cover { position: fixed; inset: 0; z-index: 20; background: #fffffffa; display: grid; place-items: center; }
+  [hidden] { display: none !important; }
+  #cover { z-index: 100; }
+  #server-status { color: #8a3516; }
+</style>
+<header>Agent 课件实验室 · 本地合成课程 · <span id="page-label"></span></header>
+<main class="question-view"></main>
+<script>
+  const params = new URLSearchParams(location.search);
+  const run = params.get('run');
+  let config, pageIndex = 0, pageId = '', recordComplete = false;
+  const stats = {clicks: 0, untrusted: 0, inputs: 0, submits: 0, starts: 0, next: 0, accepted: 0, targets: []};
+  window.labTimeline = [];
+  for (const name of ['scroll', 'pointermove', 'pointerdown', 'pointerup', 'focusin']) {
+    document.addEventListener(name, e => window.labTimeline.push({event: name, at: performance.now(), scrollY,
+      tag: e.target.tagName, cls: e.target.className, x: e.clientX, y: e.clientY}), true);
+  }
+  document.addEventListener('click', e => {
+    stats.clicks++; if (!e.isTrusted) stats.untrusted++;
+    stats.targets.push({tag: e.target.tagName, cls: e.target.className, x: e.clientX, y: e.clientY, scrollY});
+  }, true);
+  document.addEventListener('input', e => { stats.inputs++; if (!e.isTrusted) stats.untrusted++; }, true);
+  const element = (tag, cls, text) => {
+    const node = document.createElement(tag); node.className = cls; node.textContent = text || ''; return node;
+  };
+  window.labSnapshot = () => ({...stats, pageId, pageIndex, recordComplete,
+    finished: [...document.querySelectorAll('.question-wrapper.finished')].map(q => q.id),
+    status: document.querySelector('#server-status')?.textContent || ''});
+  window.labChangePage = () => { pageId += '-changed'; document.querySelector('#page-label').textContent = pageId; };
+  window.labCover = () => { const c = element('div', '', '测试遮挡层'); c.id = 'cover'; document.body.append(c); };
+  function values() {
+    return Object.fromEntries([...document.querySelectorAll('.question-wrapper')].map(q => {
+      let value;
+      if (q.dataset.kind === 'single_choice') value = [...q.querySelectorAll('.checkbox.selected')].map(n => n.parentElement.dataset.option);
+      else if (q.dataset.kind === 'true_false') value = q.querySelector('.choice-btn.selected')?.classList.contains('right-btn') ?? null;
+      else value = [...q.querySelectorAll('input')].map(n => n.value);
+      return [q.id, value];
+    }));
+  }
+  async function render() {
+    const page = config.pages[pageIndex]; pageId = page.id; recordComplete = false;
+    document.querySelector('#page-label').textContent = `${pageIndex + 1}/${config.pages.length}`;
+    const view = document.querySelector('main'); view.replaceChildren();
+    if (config.document) {
+      view.className = 'doc-content';
+      for (let i = 0; i < 12; i++) {
+        const paragraph = element('p', '', `合成文档段落 ${i + 1}：检查滚动到底后才完成课程。`);
+        paragraph.style.paddingBottom = '60px'; view.append(paragraph);
+      }
+      return;
+    }
+    for (const question of page.questions) {
+      const q = element('section', 'question-wrapper'); q.id = question.id; q.dataset.kind = question.type;
+      q.append(element('span', 'question-type-tag', question.sourceType));
+      const title = element('div', 'question-title-html', question.prompt); q.append(title);
+      if (question.type === 'single_choice') {
+        for (const option of question.options) {
+          const a = element('a', 'choice-item'); a.dataset.option = option.id;
+          a.append(element('span', 'checkbox radio'), element('span', 'option', option.id + '.'), element('span', 'content-wrapper', option.text));
+          a.onclick = e => { if (!e.isTrusted) return; q.querySelectorAll('.checkbox').forEach(n => n.classList.remove('selected')); a.firstChild.classList.add('selected'); };
+          q.append(a);
+        }
+      } else if (question.type === 'true_false') {
+        const group = element('div', 'checking-type');
+        for (const [cls, text] of [['right-btn', '正确'], ['wrong-btn', '错误']]) {
+          const button = element('div', 'choice-btn ' + cls, text);
+          button.onclick = e => { if (!e.isTrusted) return; group.querySelectorAll('.choice-btn').forEach(n => n.classList.remove('selected')); button.classList.add('selected'); };
+          group.append(button);
+        }
+        q.append(group);
+      } else {
+        for (let i = 0; i < 2; i++) {
+          const holder = element('span', 'answer-width'), input = document.createElement('input');
+          input.setAttribute('aria-label', `填空 ${i + 1}`);
+          if (config.prefilled && i === 0) input.value = '已有用户答案';
+          holder.append(input); title.append(holder);
+        }
+      }
+      if (config.long) q.style.paddingBottom = '420px';
+      view.append(q);
+    }
+    const operation = element('div', 'question-operation-area'), submit = element('button', 'btn-submit', '提交');
+    const status = element('div'); status.id = 'server-status';
+    submit.onclick = async e => {
+      if (!e.isTrusted) return;
+      stats.submits++;
+      status.textContent = '正在保存';
+      try {
+        const response = await fetch('/submit?run=' + encodeURIComponent(run), {method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({pageId, answers: values()})});
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const result = await response.json();
+        if (!result.accepted) throw new Error('答案校验失败');
+        stats.accepted++; recordComplete = true;
+        view.querySelectorAll('.question-wrapper').forEach(q => q.classList.add('finished'));
+        status.textContent = '平台记录已确认';
+      } catch (error) { status.textContent = error.message; }
+    };
+    operation.append(submit, status); view.append(operation);
+    if (pageIndex + 1 < config.pages.length) {
+      const next = element('button', 'next-page-btn', '下一页');
+      next.onclick = e => { if (!e.isTrusted || !recordComplete) return; stats.next++; pageIndex++; render(); };
+      view.append(next);
+    }
+    if (config.timed) {
+      const mask = element('div', 'limit-time-mask'), info = element('div', 'limit-time-question-info');
+      const start = element('button', '', '开始答题'); start.setAttribute('data-bind', 'click: startQuizTimer');
+      start.onclick = e => { if (!e.isTrusted) return; stats.starts++; mask.remove(); };
+      info.append(start); mask.append(info); view.append(mask);
+    }
+  }
+  window.labRerender = render;
+  if (run) fetch('/fixture?run=' + encodeURIComponent(run)).then(r => r.json()).then(async data => {
+    config = data;
+    const catalog = config.pages.map(p => ({id: () => p.id, name: () => p.id}));
+    window.koLearnCourseViewModel = {
+      currentPage: () => ({id: () => pageId, name: () => pageId, record: () => ({status: () => recordComplete})}),
+      course: () => ({name: () => '本地合成课程', chapters: () => [{sections: () => [{pages: () => catalog}]}]}),
+      nextPageName: () => pageIndex + 1 < config.pages.length ? '下一页' : '没有了'
+    };
+    if (config.slow) {
+      pageId = config.pages[0].id;
+      window.labReady = true;
+      // 启动控制器后再挂载整套题目，覆盖异步渲染和 MutationObserver 事件链。
+      const ready = setInterval(() => {
+        if (!window.__yxy_controller) return;
+        clearInterval(ready); setTimeout(render, 1200);
+      }, 50);
+    } else { await render(); window.labReady = true; }
+  });
+</script>
+</html>

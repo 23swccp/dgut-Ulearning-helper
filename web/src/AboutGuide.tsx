@@ -1,7 +1,7 @@
 import { isValidElement, type ReactNode, useEffect, useMemo, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import guideSource from "../ABOUT.md?raw";
+import guideSource from "../../README.md?raw";
 
 type AboutGuideProps = {
   version: string;

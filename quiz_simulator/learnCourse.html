@@ -16,6 +16,11 @@
     .runner-report.fail { border-color: #efb0b0; background: #fff3f3; color: #b42323; }
     .question-view { width: min(920px, calc(100% - 40px)); margin: 18px auto 60px; border: 1px solid #d9e0e8; border-radius: 10px; background: #fff; overflow: hidden; }
     .question-setting-panel { padding: 17px 22px; border-bottom: 1px solid #e8ebef; background: #fbfcfd; }
+    .limit-time-mask { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: #fff; }
+    .limit-time-mask[hidden] { display: none; }
+    .limit-time-question-info { text-align: center; padding: 32px; }
+    #alertModal { position: fixed; inset: 0; z-index: 30; display: grid; place-content: center; background: #ffffffee; }
+    #alertModal[hidden] { display: none; }
     .question-setting-list { display: flex; gap: 18px; color: #657185; font-size: 13px; }
     .question-element-node { padding: 24px 30px; border-bottom: 1px solid #edf0f3; }
     .question-title-wrapper { margin-bottom: 16px; font-size: 15px; font-weight: 600; }
@@ -90,10 +95,110 @@
       </div>
     </div>
     <div class="question-operation-area"><button type="button" class="btn-submit">提交</button></div>
+    <div class="limit-time-mask" hidden>
+      <div class="limit-time-question-info">
+        <div class="question-setting-list">共3题　限00:20:00　限答1次</div>
+        <button type="button" class="btn-submit" data-bind="text: $root.i18nMessageText().beginQuiz, click: startQuizTimer">开始答题</button>
+      </div>
+    </div>
   </main>
+  <div id="alertModal" class="modal" hidden>
+    <div>当前使用的不是wifi网络，继续播放将消耗流量，是否继续？</div>
+    <div class="modal-operation"><button class="btn-submit">继续</button><button class="btn-hollow">取消</button></div>
+  </div>
   <script>
     (() => {
-      const stats = { trustedClicks: 0, submitCount: 0 };
+      const stats = { trustedClicks: 0, submitCount: 0, startCount: 0 };
+      const networkPrompt = document.querySelector('#alertModal');
+      const networkStats = { continued: 0, cancelled: 0, kind: '' };
+      window.koLearnCourseViewModel = {
+        modalType: () => networkStats.kind,
+        currentPage: () => ({ id: () => 'simulator-page', name: () => '模拟课件' }),
+      };
+      window.showNetworkPrompt = kind => {
+        networkStats.kind = kind;
+        networkStats.continued = 0;
+        networkStats.cancelled = 0;
+        networkPrompt.hidden = false;
+      };
+      networkPrompt.querySelector('.btn-submit').addEventListener('click', event => {
+        if (!event.isTrusted) return;
+        networkStats.continued += 1;
+        networkPrompt.hidden = true;
+      });
+      networkPrompt.querySelector('.btn-hollow').addEventListener('click', () => {
+        networkStats.cancelled += 1;
+        networkPrompt.hidden = true;
+      });
+      window.getNetworkResult = () => ({...networkStats, pending: !networkPrompt.hidden});
+      window.setupTimedSkipFixture = () => {
+        window.resetQuiz(true);
+        window.skipFixtureStats = {next: 0};
+        const originalPage = window.koLearnCourseViewModel.currentPage;
+        const button = document.createElement('button');
+        button.className = 'next-page-btn'; button.textContent = '下一页';
+        button.style.cssText = 'position:fixed;bottom:10px;right:10px;z-index:25;width:100px;height:40px';
+        button.onclick = event => {
+          if (!event.isTrusted) return;
+          window.skipFixtureStats.next++;
+          window.koLearnCourseViewModel.currentPage = () => ({id:()=> 'next-page',name:()=> '后续课件'});
+          document.querySelector('.question-view').style.display = 'none';
+        };
+        document.body.append(button);
+        window.cleanupTimedSkipFixture = () => {
+          button.remove(); window.koLearnCourseViewModel.currentPage = originalPage;
+          document.querySelector('.question-view').style.display = '';
+          window.resetQuiz(false);
+        };
+      };
+      window.showSlideFixture = src => {
+        document.querySelector('#alertModal').hidden = true;
+        document.querySelector('.question-view').style.display = 'none';
+        document.querySelector('#slideFixture')?.remove();
+        const wrapper = document.createElement('div');
+        wrapper.id = 'slideFixture'; wrapper.className = 'doc-wrapper inited';
+        wrapper.style.cssText = 'position:fixed;left:130px;top:80px;width:800px;height:450px';
+        const card = document.createElement('div'); card.className = 'doc-card ppt'; card.hidden = true;
+        const frame = document.createElement('iframe'); frame.className = 'doc-iframe'; frame.src = src;
+        frame.style.cssText = 'border:3px solid black;width:800px;height:450px';
+        wrapper.append(card, frame); document.body.append(wrapper);
+        window.koLearnCourseViewModel.currentPage = () => ({id:()=> 'simulator-page',name:()=> '模拟课件',record:()=>({status:()=>true})});
+      };
+      window.showDialogCase = (kind, body, labels, options = {}) => {
+        networkStats.kind = kind;
+        const fresh = networkPrompt.cloneNode(false);
+        if (kind === 'userGuide') fresh.className = 'user-guide';
+        const info = document.createElement('div');
+        info.textContent = body;
+        if (kind === 'statistics') info.className = 'stat-page';
+        fresh.append(info);
+        window.dialogCaseResult = {clicked: [], trusted: true};
+        labels.forEach(label => {
+          const button = document.createElement('button');
+          button.textContent = label;
+          if (kind === 'userGuide') button.setAttribute('data-bind', 'click: hideGuide');
+          button.disabled = Boolean(options.disabled);
+          button.addEventListener('click', event => {
+            window.dialogCaseResult.clicked.push(label);
+            window.dialogCaseResult.trusted &&= event.isTrusted;
+            if (!options.stuck) fresh.hidden = true;
+          });
+          fresh.append(button);
+        });
+        document.querySelector('#alertModal').replaceWith(fresh);
+        fresh.hidden = false;
+        if (options.occluded) {
+          const cover = document.createElement('div');
+          cover.style.cssText = 'position:absolute;inset:0;z-index:99999;background:white';
+          fresh.append(cover);
+        }
+      };
+      const mask = document.querySelector('.limit-time-mask');
+      mask.querySelector('button').addEventListener('click', event => {
+        if (!event.isTrusted) return;
+        stats.startCount += 1;
+        mask.hidden = true;
+      });
       const choiceItems = [...document.querySelectorAll('a.choice-item')];
       const judgmentItems = [...document.querySelectorAll('.checking-type .choice-btn')];
       const blank = document.querySelector('.answer-width input');
@@ -116,13 +221,15 @@
         if (blank.value.length > 0) document.querySelector('#question-sim-blank').classList.add('finished');
       });
 
-      window.resetQuiz = () => {
+      window.resetQuiz = (timed = false) => {
         wrappers.forEach(wrapper => wrapper.classList.remove('finished'));
         choiceItems.forEach(item => item.querySelector('.checkbox').classList.remove('selected'));
         judgmentItems.forEach(item => item.classList.remove('selected'));
         blank.value = '';
         stats.trustedClicks = 0;
         stats.submitCount = 0;
+        stats.startCount = 0;
+        mask.hidden = !timed;
         window.scrollTo(0, 0);
         return true;
       };
@@ -133,6 +240,8 @@
         finished: Object.fromEntries(wrappers.map(wrapper => [wrapper.id, wrapper.classList.contains('finished')])),
         trustedClicks: stats.trustedClicks,
         submitCount: stats.submitCount,
+        startCount: stats.startCount,
+        startPending: !mask.hidden,
       });
       window.renderRunnerResult = (title, passed, details) => {
         const report = document.querySelector('#runnerReport');

@@ -13,7 +13,7 @@
 ## 发布前验证
 
 ```powershell
-python -m pytest -q test_backend.py test_course.py test_launcher.py test_quiz.py test_updater.py test_gitee_release.py
+python -m pytest -q
 cd web
 npm test -- --run
 npm run build

@@ -10,10 +10,15 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-from app_paths import data_root, resource_root
+_SOURCE_ROOT = Path(__file__).resolve().parent / "src"
+if str(_SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SOURCE_ROOT))
+
+from dgutbot.app.app_paths import data_root, resource_root
 
 
 APP_NAME = "优学院助手"

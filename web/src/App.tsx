@@ -161,7 +161,11 @@ function App() {
   }, []);
   useEffect(() => {
     const heartbeat = () => void fetch("/api/heartbeat", { method: "POST", keepalive: true }).catch(() => undefined);
-    const closing = () => { navigator.sendBeacon("/api/client-closed", ""); };
+    const closing = () => {
+      if (!navigator.sendBeacon("/api/client-closed", "")) {
+        void fetch("/api/client-closed", { method: "POST", keepalive: true }).catch(() => undefined);
+      }
+    };
     heartbeat();
     const timer = window.setInterval(heartbeat, 2000);
     window.addEventListener("pagehide", closing);
@@ -472,11 +476,11 @@ function App() {
       {page === "terminal" && <section className={`terminal ${phase === "courses" ? "course-picking" : ""}`}><pre ref={endRef}>{logs.join("\n")}</pre><div className="command"><b>›</b><input ref={commandRef} aria-label="课程签到命令" autoFocus disabled={busy || phase === "login"} value={command} onChange={event => setCommand(event.target.value)} onKeyDown={handleSignKeyDown} placeholder={busy ? "正在自动读取登录缓存…" : phase === "login" ? "等待浏览器登录，完成后自动继续…" : phase === "courses" ? "搜索课程，↑↓ 选择，Enter 确认…" : phase === "selected" ? "按 Enter 开始监测，输入 / 重新选课…" : phase === "monitoring" ? "正在监测；输入 / 停止…" : "正在准备签到模块…"}/></div>{phase === "courses" && <motion.div className="course-quick-pick" ref={coursePickerRef} initial={reduceMotion ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}><div className="course-picker-head"><strong>选择签到课程</strong><span>{matchingCourses.length} / {courseChoices.length} 门</span></div><div className="course-options" role="listbox" aria-label="课程列表">{matchingCourses.length ? matchingCourses.map((course, index) => <button key={course.id} type="button" role="option" aria-selected={index === courseCursor} className={`course-option ${index === courseCursor ? "active" : ""}`} onMouseEnter={() => setCourseCursor(index)} onClick={() => void chooseSignCourse(course)}><span><strong>{course.name}</strong><small>{course.teacherName || "未知教师"}</small></span><code>ID {course.id}</code></button>) : <div className="course-empty">没有匹配课程，请换个关键词。</div>}</div><div className="course-picker-help">↑↓ 移动　Enter 选择　Esc 清空搜索</div></motion.div>}</section>}
       {page === "learning" && <section className="terminal learning-terminal">
         <div className="course-status" aria-label="刷课实时状态">
-          <div className="course-status-head"><strong className={`run-state ${courseStatus.stalled || courseStatus.paused ? "warning" : helperRunning ? "success" : ""}`}>{runStateLabel(courseStatus)}</strong><span className={courseStatus.connected ? "connected" : "disconnected"}>{connectionLabel(courseStatus)}</span><span className="course-name">{courseStatus.courseName || "未识别课程"}</span></div>
+          <div className="course-status-head"><strong className={`run-state ${courseStatus.resourceError || courseStatus.stalled || courseStatus.paused ? "warning" : helperRunning ? "success" : ""}`}>{runStateLabel(courseStatus)}</strong><span className={courseStatus.connected ? "connected" : "disconnected"}>{connectionLabel(courseStatus)}</span><span className="course-name">{courseStatus.courseName || "未识别课程"}</span></div>
           <div className="course-status-grid">
             <StatusItem label="页面" value={courseStatus.page?.name || "未识别"} />
             <StatusItem label="进度" value={pagePosition} />
-            <StatusItem label="页面状态" value={courseStatus.pageCompleted ? "已完成" : courseStatus.running ? "确认中" : "未确认"} tone={courseStatus.pageCompleted ? "success" : ""} />
+            <StatusItem label="页面状态" value={courseStatus.resourceError ? "资源异常" : courseStatus.pageCompleted ? "已完成" : courseStatus.running ? "确认中" : "未确认"} tone={courseStatus.resourceError ? "warning" : courseStatus.pageCompleted ? "success" : ""} />
             <StatusItem label="当前任务" value={courseStatus.currentTask || "等待"} />
             <StatusItem label="视频" value={videoProgress} />
             <StatusItem label="倍速" value={`${courseStatus.playbackRate || playbackRate}×`} />
@@ -485,6 +489,11 @@ function App() {
             <StatusItem label="停滞" value={courseStatus.stalled ? "是" : "否"} tone={courseStatus.stalled ? "warning" : ""} />
           </div>
           <div className="page-plan"><span>页面流程</span><strong>{formatPagePlan(courseStatus.pagePlan)}</strong></div>
+          {courseStatus.resourceError && <div className="status-read-warning" role="status">
+            {courseStatus.resourceError.message}
+            {courseStatus.resourceError.total > 0 && `（第 ${courseStatus.resourceError.current}/${courseStatus.resourceError.total} 张）`}。
+            已停止翻页，等待资源恢复；不会自动刷新、跳过或标记完成。
+          </div>}
           {courseStatus.running && !courseStatus.readOk && <div className="status-read-warning">页面状态读取失败：{courseStatus.readFailures || 1} 次</div>}
         </div>
         <div className="course-event-log" ref={learningLogRef} onScroll={handleLearningScroll}>

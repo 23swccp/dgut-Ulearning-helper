@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><title>合成 PPT 播放器</title>
+<style>
+html,body {margin:0;overflow:hidden;height:100%;font:20px sans-serif}
+#ppt {height:100%;background:#eee} #view {height:calc(100% - 50px)}
+#view>div {padding:30px} #bottom {position:absolute;bottom:0;height:50px;display:flex;align-items:center;background:#d54a23;width:100%;gap:20px}
+.pgRight,.btmRight {padding:10px;cursor:pointer} .waitmsg {position:absolute;inset:0;background:#aaa}
+</style>
+<div id="ppt"><div id="view"><div id="view0">第一页</div><div id="view1" hidden>第二页</div><div id="view2" hidden>第三页</div></div>
+<div id="bottom"><span id="PageIndex">1</span>/<span id="PageCount">3</span>
+<div class="btmRight" title="下一个动画">动画</div><div id="pageNext" class="pgRight" title="下一张"><span>下一张</span></div>
+<div class="waitmsg" hidden>正在加载</div></div></div>
+<div id="msg" hidden></div>
+<script>
+window.stats={next:0,animation:0,trusted:true};
+document.querySelector('.btmRight').onclick=()=>stats.animation++;
+document.querySelector('#pageNext').onclick=event=>{
+  stats.next++; stats.trusted &&= event.isTrusted;
+  let current=Number(document.querySelector('#PageIndex').textContent);
+  if(current>=3)return;
+  document.querySelector('#view'+(current-1)).hidden=true;
+  document.querySelector('#view'+current).hidden=false;
+  document.querySelector('#PageIndex').textContent=current+1;
+};
+</script>

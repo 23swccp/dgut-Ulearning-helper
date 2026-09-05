@@ -34,6 +34,7 @@ export type CourseStatus = {
   maxRetries?: number;
   stalled?: boolean;
   stallReason?: string;
+  resourceError?: { code: string; message: string; current: number; total: number } | null;
 };
 
 export const MAX_COURSE_EVENTS = 500;
@@ -65,6 +66,7 @@ export function formatDuration(value?: number) {
 }
 
 export function runStateLabel(status: CourseStatus) {
+  if (status.resourceError) return "课件异常";
   if (status.completed || status.controllerState === "COMPLETED") return "已完成";
   if (status.paused) return "已暂停";
   if (status.stalled) return "恢复中";
@@ -77,9 +79,11 @@ export function connectionLabel(status: CourseStatus) {
 
 export function formatPagePlan(plan?: CourseStatus["pagePlan"]) {
   if (!plan?.length) return "确认中";
-  const labels: Record<string, string> = { record: "平台记录", video: "视频", document: "文档", quiz: "测验" };
+  const labels: Record<string, string> = { record: "平台记录", video: "视频", document: "文档", quiz: "测验", network: "网络提示", dialog: "页面提示" };
   return plan.map(task => {
     const label = labels[task.kind] || task.kind;
+    if (task.state === "error") return `${label}（资源异常）`;
+    if (task.state === "skipped") return `${label}（已跳过）`;
     if (task.kind === "quiz" && task.types) {
       const detail = Object.entries(task.types).map(([name, count]) => `${name} ${count}`).join("、");
       return detail ? `${label}（${detail}）` : `${label} ${task.count || 0}`;

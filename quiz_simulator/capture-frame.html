@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8"><title>子框架</title>
+<div class="doc-wrapper"><span>CAPTURE_PRIVATE_MARKER_123456789</span><button>下一页</button></div>
+<script>
+if (new URLSearchParams(location.search).get('kind') === 'cross') {
+  const nested = document.createElement('iframe');
+  nested.src = 'http://127.0.0.1:' + location.port + '/capture-frame.html?kind=nested';
+  document.body.append(nested);
+}
+</script>

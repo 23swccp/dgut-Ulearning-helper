@@ -18,6 +18,7 @@ describe("course observability", () => {
   });
 
   it("restores running and recovery labels from backend status", () => {
+    expect(runStateLabel({ running: true, resourceError: { code: "parse-failed", message: "解析失败", current: 1, total: 111 } })).toBe("课件异常");
     expect(runStateLabel({ running: true })).toBe("运行中");
     expect(runStateLabel({ running: true, stalled: true })).toBe("恢复中");
     expect(runStateLabel({ running: true, paused: true })).toBe("已暂停");
@@ -27,6 +28,9 @@ describe("course observability", () => {
   });
 
   it("renders a composed page plan without exposing internal selectors", () => {
+    expect(formatPagePlan([{ kind: "document", state: "error", count: 1 }])).toBe("文档（资源异常）");
+    expect(formatPagePlan([{ kind: "quiz", state: "skipped", count: 18, types: { "单选题": 18 } }])).toBe("测验（已跳过）");
+    expect(formatPagePlan([{ kind: "dialog", state: "pending", count: 1 }])).toBe("页面提示 1");
     expect(formatPagePlan([
       { kind: "video", state: "completed", count: 1 },
       { kind: "document", state: "pending", count: 1 },
